@@ -1,0 +1,37 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "changelog": [
+    "./changelog.mjs",
+    {
+      "repo": "vercel/workflow"
+    }
+  ],
+  "commit": false,
+  "fixed": [
+    [
+      "workflow",
+      "@workflow/core"
+    ],
+    [
+      "@workflow/web",
+      "@workflow/web-shared"
+    ]
+  ],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH": {
+    "onlyUpdatePeerDependentsWhenOutOfRange": true
+  },
+  "ignore": [
+    "docs",
+    "tarballs",
+    "nextjs-turbopack",
+    "nextjs-webpack",
+    "workflow-sdk-compiler-playground",
+    "@workflow/docs-typecheck",
+    "@workflow/example-*",
+    "@workflow/vitest-workbench"
+  ]
+}

@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - stable
+  # Allow manual triggering from the Actions tab. Useful for re-running the
+  # release flow when a push from the default GITHUB_TOKEN (e.g. a clean
+  # cherry-pick from the backport workflow, or a merged "Version Packages"
+  # PR) does not automatically trigger this workflow.
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      # Main is currently the v5 release line. Stable should set this to 4;
+      # future version branches should update it to their release major.
+      RELEASE_VERSION: 5
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: "pnpm"
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Check package release major
+        run: node .github/scripts/check-release-major.js "$RELEASE_VERSION"
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create Release Pull Request or Publish to npm
+        id: changesets
+        uses: changesets/action@63a615b9cd06ba9a3e6d13796c7fbcb080a60a0b # v1.8.0
+        with:
+          version: pnpm ci:version
+          publish: pnpm ci:publish
+          createGithubReleases: false
+          setupGitUser: false
+          # Use GitHub API for GPG-signed commits (required by branch rules).
+          commitMode: github-api
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          # Generate release notes (PUBLISHED_PACKAGES filters to only include packages from this release)
+          RELEASE_JSON=$(node scripts/generate-release-notes.mjs)
+          TAG=$(echo "$RELEASE_JSON" | jq -r '.tag')
+          TITLE=$(echo "$RELEASE_JSON" | jq -r '.title')
+          BODY=$(echo "$RELEASE_JSON" | jq -r '.body')
+
+          # Determine release flags based on branch
+          if [ "$GITHUB_REF_NAME" = "stable" ]; then
+            PRERELEASE="false"
+            LATEST_FLAG="--latest"
+          else
+            PRERELEASE="true"
+            LATEST_FLAG="--latest=false"
+          fi
+
+          # Check if a release with this tag already exists
+          if gh release view "$TAG" &>/dev/null; then
+            echo "Release $TAG already exists, updating..."
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes "$BODY" \
+              $LATEST_FLAG \
+              --prerelease=$PRERELEASE
+          else
+            echo "Creating new release $TAG..."
+            gh release create "$TAG" \
+              --target "${{ github.sha }}" \
+              --title "$TITLE" \
+              --notes "$BODY" \
+              $LATEST_FLAG \
+              --prerelease=$PRERELEASE
+          fi
+
+      - name: Post release notes to Slack
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_RELEASE_CHANNEL_ID: ${{ secrets.SLACK_RELEASE_CHANNEL_ID }}
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_RELEASE_CHANNEL_ID" ]; then
+            echo "Missing Slack secrets: SLACK_BOT_TOKEN and/or SLACK_RELEASE_CHANNEL_ID"
+            exit 1
+          fi
+
+          # Post to Slack via chat.postMessage (payload is chunked to Slack limits)
+          node scripts/generate-release-slack-payload.mjs --post

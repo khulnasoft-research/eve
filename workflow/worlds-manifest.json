@@ -1,0 +1,332 @@
+{
+  "worlds": [
+    {
+      "id": "local",
+      "type": "official",
+      "package": "@workflow/world-local",
+      "name": "Local",
+      "description": "Zero-config world bundled with Workflow for local development. No external services required.",
+      "docs": "/docs/deploying/world/local-world",
+      "env": {},
+      "services": [],
+      "features": []
+    },
+    {
+      "id": "postgres",
+      "type": "official",
+      "package": "@workflow/world-postgres",
+      "name": "Postgres",
+      "description": "Production-ready, self-hosted world using PostgreSQL for durable storage and graphile-worker for reliable job processing.",
+      "docs": "/docs/deploying/world/postgres-world",
+      "example": "https://github.com/vercel/workflow-examples/tree/main/postgres",
+      "features": [],
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@workflow/world-postgres",
+        "WORKFLOW_POSTGRES_URL": "postgres://world:world@localhost:5432/world"
+      },
+      "services": [
+        {
+          "name": "postgres",
+          "image": "postgres:18-alpine",
+          "ports": ["5432:5432"],
+          "env": {
+            "POSTGRES_USER": "world",
+            "POSTGRES_PASSWORD": "world",
+            "POSTGRES_DB": "world"
+          },
+          "healthCheck": {
+            "cmd": "pg_isready",
+            "interval": "10s",
+            "timeout": "5s",
+            "retries": 5
+          }
+        }
+      ],
+      "setup": "./packages/world-postgres/bin/setup.js"
+    },
+    {
+      "id": "vercel",
+      "type": "official",
+      "package": "@workflow/world-vercel",
+      "name": "Vercel",
+      "description": "Fully-managed world for Vercel deployments. Zero config, infinitely scalable, built-in authentication.",
+      "docs": "/docs/deploying/world/vercel-world",
+      "features": ["encryption"],
+      "env": {
+        "WORKFLOW_VERCEL_ENV": "production"
+      },
+      "services": [],
+      "requiresDeployment": true
+    },
+    {
+      "id": "turso",
+      "type": "community",
+      "package": "@workflow-worlds/turso",
+      "name": "Turso",
+      "description": "Turso/libSQL World for embedded or remote SQLite databases",
+      "repository": "https://github.com/mizzle-dev/workflow-worlds",
+      "docs": "https://github.com/mizzle-dev/workflow-worlds/tree/main/packages/turso",
+      "features": [],
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@workflow-worlds/turso",
+        "WORKFLOW_TURSO_DATABASE_URL": "file:workflow.db"
+      },
+      "services": [],
+      "setup": "pnpm exec workflow-turso-setup"
+    },
+    {
+      "id": "mongodb",
+      "type": "community",
+      "package": "@workflow-worlds/mongodb",
+      "name": "MongoDB",
+      "description": "MongoDB World using native driver",
+      "repository": "https://github.com/mizzle-dev/workflow-worlds",
+      "docs": "https://github.com/mizzle-dev/workflow-worlds/tree/main/packages/mongodb",
+      "features": [],
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@workflow-worlds/mongodb",
+        "WORKFLOW_MONGODB_URI": "mongodb://localhost:27017",
+        "WORKFLOW_MONGODB_DATABASE_NAME": "workflow"
+      },
+      "services": [
+        {
+          "name": "mongodb",
+          "image": "mongo:7",
+          "ports": ["27017:27017"],
+          "healthCheck": {
+            "cmd": "mongosh --eval 'db.runCommand({ ping: 1 })'",
+            "interval": "10s",
+            "timeout": "5s",
+            "retries": 5
+          }
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "community",
+      "package": "@workflow-worlds/redis",
+      "name": "Redis",
+      "description": "Redis World using BullMQ for queues, Redis Streams for output",
+      "repository": "https://github.com/mizzle-dev/workflow-worlds",
+      "docs": "https://github.com/mizzle-dev/workflow-worlds/tree/main/packages/redis",
+      "features": [],
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@workflow-worlds/redis",
+        "WORKFLOW_REDIS_URI": "redis://localhost:6379"
+      },
+      "services": [
+        {
+          "name": "redis",
+          "image": "redis:7-alpine",
+          "ports": ["6379:6379"],
+          "healthCheck": {
+            "cmd": "redis-cli ping",
+            "interval": "10s",
+            "timeout": "5s",
+            "retries": 5
+          }
+        }
+      ]
+    },
+    {
+      "id": "jazz",
+      "type": "community",
+      "package": "workflow-world-jazz",
+      "name": "Jazz",
+      "description": "Jazz Cloud world for local-first sync and real-time collaboration",
+      "repository": "https://github.com/garden-co/workflow-world-jazz",
+      "docs": "https://github.com/garden-co/workflow-world-jazz",
+      "features": [],
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "workflow-world-jazz"
+      },
+      "services": [],
+      "requiresCredentials": true,
+      "credentialsNote": "Requires JAZZ_API_KEY, JAZZ_WORKER_ACCOUNT, and JAZZ_WORKER_SECRET from Jazz Cloud"
+    },
+    {
+      "id": "fantasticfour-redis",
+      "type": "community",
+      "package": "@fantasticfour/world-redis",
+      "name": "Redis",
+      "description": "Pure Redis-based world using Redis Lists for lightweight and simple workflow execution. Minimal dependencies, fast setup, ideal for development and small-scale production.",
+      "repository": "https://github.com/vinnymac/worlds",
+      "docs": "https://github.com/vinnymac/worlds/tree/main/packages/world-redis",
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@fantasticfour/world-redis",
+        "WORKFLOW_REDIS_URI": "redis://localhost:6379"
+      },
+      "services": [
+        {
+          "name": "redis",
+          "image": "redis:7-alpine",
+          "ports": ["6379:6379"],
+          "healthCheck": {
+            "cmd": "redis-cli ping",
+            "interval": "10s",
+            "timeout": "5s",
+            "retries": 5
+          }
+        }
+      ],
+      "setup": "pnpm exec fantasticfour-redis-setup"
+    },
+    {
+      "id": "fantasticfour-redis-bullmq",
+      "type": "community",
+      "package": "@fantasticfour/world-redis-bullmq",
+      "name": "Redis + BullMQ",
+      "description": "Production-grade Redis world using BullMQ for robust job queue management. Advanced features like rate limiting, priority queues, and delayed jobs.",
+      "repository": "https://github.com/vinnymac/worlds",
+      "docs": "https://github.com/vinnymac/worlds/tree/main/packages/world-redis-bullmq",
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@fantasticfour/world-redis-bullmq",
+        "WORKFLOW_REDIS_URI": "redis://localhost:6379"
+      },
+      "services": [
+        {
+          "name": "redis",
+          "image": "redis:7-alpine",
+          "ports": ["6379:6379"],
+          "healthCheck": {
+            "cmd": "redis-cli ping",
+            "interval": "10s",
+            "timeout": "5s",
+            "retries": 5
+          }
+        }
+      ],
+      "setup": "pnpm exec fantasticfour-redis-bullmq-setup"
+    },
+    {
+      "id": "fantasticfour-cloudflare",
+      "type": "community",
+      "package": "@fantasticfour/world-cloudflare",
+      "name": "Cloudflare",
+      "description": "Cloudflare Durable Objects world with edge-native SQLite storage and global <10ms latency. Deploy workflows to 300+ cities worldwide with automatic state replication.",
+      "repository": "https://github.com/vinnymac/worlds",
+      "docs": "https://github.com/vinnymac/worlds/tree/main/packages/world-cloudflare",
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@fantasticfour/world-cloudflare"
+      },
+      "services": [],
+      "requiresDeployment": true
+    },
+    {
+      "id": "fantasticfour-mysql",
+      "type": "community",
+      "package": "@fantasticfour/world-mysql",
+      "name": "MySQL",
+      "description": "Pure MySQL world for durable storage, queueing, and streaming. No external dependencies — works with PlanetScale, RDS, Aiven, or any MySQL provider.",
+      "repository": "https://github.com/vinnymac/worlds",
+      "docs": "https://github.com/vinnymac/worlds/tree/main/packages/world-mysql",
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@fantasticfour/world-mysql",
+        "DATABASE_URL": "mysql://root:root@localhost:3306/mysql_test"
+      },
+      "services": [],
+      "requiresCredentials": true,
+      "credentialsNote": "Requires MySQL server (CI does not yet support mysql service containers)",
+      "setup": "pnpm exec world-mysql-setup"
+    },
+    {
+      "id": "fantasticfour-azure",
+      "type": "community",
+      "package": "@fantasticfour/world-azure",
+      "name": "Azure",
+      "description": "Azure Cosmos DB + Service Bus world with Change Feed streaming. Native Azure integration for enterprise deployments.",
+      "repository": "https://github.com/vinnymac/worlds",
+      "docs": "https://github.com/vinnymac/worlds/tree/main/packages/world-azure",
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@fantasticfour/world-azure",
+        "COSMOS_ENDPOINT": "",
+        "COSMOS_KEY": "",
+        "SERVICE_BUS_CONNECTION_STRING": ""
+      },
+      "services": [],
+      "requiresCredentials": true,
+      "credentialsNote": "Requires Azure Cosmos DB endpoint/key and Service Bus connection string"
+    },
+    {
+      "id": "fantasticfour-nats-jetstream",
+      "type": "community",
+      "package": "@fantasticfour/world-nats-jetstream",
+      "name": "NATS JetStream",
+      "description": "NATS JetStream world with built-in clustering support. Self-hosted, high-performance messaging for workflow execution.",
+      "repository": "https://github.com/vinnymac/worlds",
+      "docs": "https://github.com/vinnymac/worlds/tree/main/packages/world-nats-jetstream",
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@fantasticfour/world-nats-jetstream",
+        "WORKFLOW_NATS_URL": "nats://localhost:4222"
+      },
+      "services": [],
+      "requiresCredentials": true,
+      "credentialsNote": "Requires NATS server with JetStream enabled (CI does not yet support nats service containers)"
+    },
+    {
+      "id": "fantasticfour-upstash",
+      "type": "community",
+      "package": "@fantasticfour/world-upstash",
+      "name": "Upstash",
+      "description": "Serverless-native world using Upstash Redis for storage and QStash for HTTP-based queue management. Edge-ready with zero infrastructure to manage.",
+      "repository": "https://github.com/vinnymac/worlds",
+      "docs": "https://github.com/vinnymac/worlds/tree/main/packages/world-upstash",
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@fantasticfour/world-upstash",
+        "UPSTASH_REDIS_REST_URL": "",
+        "UPSTASH_REDIS_REST_TOKEN": "",
+        "UPSTASH_QSTASH_TOKEN": ""
+      },
+      "services": [],
+      "requiresCredentials": true,
+      "credentialsNote": "Requires Upstash Redis and QStash credentials from Upstash console (https://console.upstash.com)"
+    },
+    {
+      "id": "platformatic",
+      "type": "community",
+      "package": "@platformatic/world",
+      "version": "0.8.1",
+      "name": "Platformatic",
+      "description": "Platformatic World backed by a centralized workflow service with PostgreSQL for version-safe orchestration on Kubernetes",
+      "repository": "https://github.com/platformatic/platformatic-world",
+      "docs": "https://github.com/platformatic/platformatic-world",
+      "features": [],
+      "env": {
+        "WORKFLOW_TARGET_WORLD": "@platformatic/world",
+        "PLT_WORLD_SERVICE_URL": "http://localhost:3042",
+        "PLT_WORLD_APP_ID": "default",
+        "PLT_WORLD_DEPLOYMENT_VERSION": "local"
+      },
+      "services": [
+        {
+          "name": "postgres",
+          "image": "postgres:18-alpine",
+          "ports": ["5432:5432"],
+          "env": {
+            "POSTGRES_USER": "wf",
+            "POSTGRES_PASSWORD": "wf",
+            "POSTGRES_DB": "workflow"
+          },
+          "healthCheck": {
+            "cmd": "pg_isready -h localhost",
+            "retries": 5
+          }
+        },
+        {
+          "name": "platformatic-workflow",
+          "image": "platformatic/workflow:0.8.1",
+          "ports": ["3042:3042"],
+          "env": {
+            "DATABASE_URL": "postgres://wf:wf@localhost:5432/workflow",
+            "PORT": "3042"
+          },
+          "healthCheck": {
+            "cmd": "curl -sf http://localhost:3042/status",
+            "retries": 10
+          }
+        }
+      ]
+    }
+  ]
+}

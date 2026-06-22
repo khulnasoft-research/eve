@@ -1,0 +1,16 @@
+{
+  "name": "sandbox-filesystem-snapshots-example",
+  "version": "0.0.17",
+  "private": true,
+  "description": "Example demonstrating filesystem snapshotting",
+  "main": "filesystem-snapshots.ts",
+  "scripts": {
+    "start": "node --env-file .env.local --experimental-strip-types filesystem-snapshots.ts"
+  },
+  "dependencies": {
+    "@vercel/sandbox": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

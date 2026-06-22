@@ -1,0 +1,56 @@
+name: 'Setup Workflow Dev Environment'
+description: 'Setup Node.js, pnpm, and optionally Rust for Workflow development. Note: Checkout must be done before calling this action.'
+
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '22.x'
+  setup-rust:
+    description: 'Whether to setup Rust toolchain'
+    required: false
+    default: 'false'
+  install-dependencies:
+    description: 'Whether to install dependencies'
+    required: false
+    default: 'true'
+  install-args:
+    description: 'Additional arguments for pnpm install (e.g., --ignore-scripts)'
+    required: false
+    default: ''
+  build-packages:
+    description: 'Whether to build packages (excludes workbenches)'
+    required: false
+    default: 'true'
+  cache-pnpm:
+    description: 'Whether to enable the pnpm store cache. Disable for jobs that never run pnpm install (the post-job cache save fails with "Path Validation Error" when the store path was never created).'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Rust
+      if: ${{ inputs.setup-rust == 'true' }}
+      uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+      with:
+        toolchain: stable
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+    - name: Setup Node.js ${{ inputs.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.cache-pnpm == 'true' && 'pnpm' || '' }}
+
+    - name: Install Dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
+      shell: bash
+      run: pnpm install --frozen-lockfile ${{ inputs.install-args }}
+
+    - name: Build all packages
+      if: ${{ inputs.build-packages == 'true' }}
+      shell: bash
+      run: pnpm turbo run build --filter='!./workbench/*'

@@ -1,0 +1,280 @@
+/**
+ * Global type declarations for documentation code samples.
+ * These provide liberal types for placeholder functions and variables
+ * commonly used in documentation examples.
+ *
+ * Wrapped in `declare global` to ensure these are available globally
+ * even when moduleDetection is set to "force" (for top-level await support).
+ */
+
+export {};
+
+declare global {
+  // Node.js globals
+  const process: {
+    env: Record<string, string | undefined>;
+    [key: string]: any;
+  };
+  const Buffer: {
+    from(data: any, encoding?: string): any;
+    [key: string]: any;
+  };
+  const require: {
+    (module: string): any;
+    resolve(module: string): string;
+    [key: string]: any;
+  };
+
+  // JSX intrinsic elements (for React examples)
+  namespace JSX {
+    interface IntrinsicElements {
+      div: any;
+      form: any;
+      strong: any;
+      span: any;
+      button: any;
+      input: any;
+      label: any;
+      p: any;
+      h1: any;
+      h2: any;
+      h3: any;
+      [elemName: string]: any;
+    }
+  }
+
+  // Placeholder step functions - all accept any args and return Promise<any>
+  function fetchOrder(...args: any[]): Promise<any>;
+  function fetchOrders(...args: any[]): Promise<any>;
+  function fetchUser(...args: any[]): Promise<any>;
+  function fetchUserData(...args: any[]): Promise<any>;
+  function fetchPreferences(...args: any[]): Promise<any>;
+  function createUser(...args: any[]): Promise<any>;
+  function sendWelcomeEmail(...args: any[]): Promise<any>;
+  function sendOnboardingEmail(...args: any[]): Promise<any>;
+  function sendBirthdayCard(...args: any[]): Promise<any>;
+  function sendRSVPEmail(...args: any[]): Promise<any>;
+  function sendHumanApprovalEmail(...args: any[]): Promise<any>;
+  function chargePayment(...args: any[]): Promise<any>;
+  function processData(...args: any[]): Promise<any>;
+  function processMessage(...args: any[]): Promise<any>;
+  function executeExternalTask(...args: any[]): Promise<any>;
+  function greetStep(...args: any[]): Promise<any>;
+  function makeCardImage(...args: any[]): Promise<any>;
+  function makeCardText(...args: any[]): Promise<any>;
+  function transform(...args: any[]): any;
+  function follow(...args: any[]): Promise<any>;
+  function loadOrder(...args: any[]): Promise<any>;
+  function reserveInventory(...args: any[]): Promise<any>;
+  function reviewManually(...args: any[]): Promise<any>;
+  function spawnChild(...args: any[]): Promise<any>;
+
+  // Streaming helpers
+  function startStream(...args: any[]): Promise<void>;
+  function endStream(...args: any[]): Promise<void>;
+  function streamTextStep(...args: any[]): Promise<{
+    messages: any[];
+    finishReason: string;
+    [key: string]: any;
+  }>;
+
+  // Polling/status helpers
+  function checkJobStatus(jobId: string): Promise<{
+    status: string;
+    data: any;
+    [key: string]: any;
+  }>;
+
+  // Placeholder types
+  type Order = {
+    id: string;
+    status: string;
+    [key: string]: any;
+  };
+  type SlackMessage = {
+    channel: string;
+    text: string;
+    [key: string]: any;
+  };
+  type StepResult = any;
+
+  class BaseBuilder {
+    constructor(options: any);
+    build(): Promise<void>;
+    getInputFiles(): Promise<string[]>;
+    createWorkflowsBundle(...args: any[]): Promise<any>;
+    createStepsBundle(...args: any[]): Promise<any>;
+    createWebhookBundle(...args: any[]): Promise<any>;
+  }
+
+  // External service mocks
+  const Stripe: new (key: string) => any;
+  const stripe: {
+    paymentIntents: { create: (data: any) => Promise<any> };
+    [key: string]: any;
+  };
+  const ups: {
+    track: (id: string) => Promise<any>;
+    [key: string]: any;
+  };
+  const gateway: any;
+
+  // AI SDK types that may not be exported
+  type UIMessage = {
+    role: string;
+    content: string;
+    [key: string]: any;
+  };
+  type LanguageModelV2 = any;
+  type LanguageModelV2Prompt = any;
+  const myModel: LanguageModelV2;
+  function convertToModelMessages(messages: any[]): Promise<any[]>;
+  function createUIMessageStreamResponse(options: any): Response;
+
+  // Workflow-specific placeholders
+  // These are user-defined instances (result of defineHook<...>()) with proper return types
+  const approvalHook: {
+    create(options?: any): Promise<any> & { token: string };
+    resume(
+      token: string,
+      data?: any
+    ): Promise<{
+      runId: string;
+      hookId: string;
+      token: string;
+      ownerId: string;
+      projectId: string;
+      environment: string;
+      createdAt: Date;
+      [key: string]: any;
+    }>;
+  };
+  const chatMessageHook: typeof approvalHook;
+  const writable: WritableStream<any>;
+
+  // Form/component props commonly used in React examples
+  const input: string;
+  const setInput: (value: string) => void;
+  const data: any;
+  const value: any;
+  const className: string;
+  const key: string | number;
+  const placeholder: string;
+  const onSubmit: (e: any) => void;
+  const onChange: (e: any) => void;
+  const e: any;
+
+  // Augment Request to include respondWith for docs that show webhook patterns
+  // without using the full createWebhook({ respondWith: "manual" }) overload.
+  interface Request {
+    respondWith(response: Response): Promise<void>;
+  }
+
+  // Observability utilities (workflow/observability)
+  function getEncryptionKeyForRun(runId: string): Promise<any>;
+  function hydrateResourceIOWithKey(resource: any, key: any): any;
+
+  // Constants used in examples
+  const FLIGHT_ASSISTANT_PROMPT: string;
+  const flightBookingTools: any;
+  const MAX_STEPS: number;
+  const reportId: string;
+  const userId: string;
+  const runId: string;
+  const stepId: string;
+  const world: {
+    runs: {
+      get: (...args: any[]) => Promise<any>;
+      list: (...args: any[]) => Promise<any>;
+    };
+    steps: {
+      get: (...args: any[]) => Promise<any>;
+      list: (...args: any[]) => Promise<any>;
+    };
+    hooks: {
+      get: (...args: any[]) => Promise<any>;
+      getByToken: (...args: any[]) => Promise<any>;
+      list: (...args: any[]) => Promise<any>;
+    };
+    events: {
+      create: (...args: any[]) => Promise<any>;
+      get: (...args: any[]) => Promise<any>;
+      list: (...args: any[]) => Promise<any>;
+      listByCorrelationId: (...args: any[]) => Promise<any>;
+    };
+    // Stream methods live on world.streams (Streamer interface)
+    streams: {
+      write: (
+        runId: string,
+        name: string,
+        chunk: string | Uint8Array
+      ) => Promise<void>;
+      writeMulti?: (
+        runId: string,
+        name: string,
+        chunks: (string | Uint8Array)[]
+      ) => Promise<void>;
+      get: (
+        runId: string,
+        name: string,
+        startIndex?: number
+      ) => Promise<ReadableStream<Uint8Array>>;
+      close: (runId: string, name: string) => Promise<void>;
+      list: (runId: string) => Promise<string[]>;
+      getChunks: (
+        runId: string,
+        name: string,
+        options?: { limit?: number; cursor?: string }
+      ) => Promise<any>;
+      getInfo: (
+        runId: string,
+        name: string
+      ) => Promise<{ tailIndex: number; done: boolean }>;
+    };
+    // Queue methods live directly on world (Queue interface)
+    getDeploymentId: (...args: any[]) => Promise<any>;
+    queue: (...args: any[]) => Promise<any>;
+    createQueueHandler: (...args: any[]) => any;
+  };
+  /** Resolves the configured World (async — may perform dynamic import / env-based setup). */
+  function getWorld(): Promise<typeof world>;
+
+  const streamId: string;
+  const streamName: string;
+  const hookId: string;
+  const eventId: string;
+  const cursor: string | undefined;
+  const name: string;
+  const chunk: any;
+  const chunk1: any;
+  const chunk2: any;
+  const step: any;
+  const message: any;
+  const opts: any;
+  const prefix: string;
+  const callback: (...args: any[]) => any;
+  const token: string;
+  const queueName: any;
+  const payload: any;
+
+  // Workflow placeholders used in examples
+  const myWorkflow: (...args: any[]) => Promise<any>;
+  const childWorkflow: (...args: any[]) => Promise<any>;
+  const orderId: string;
+
+  // Nitro server-side auto-imports. These are globally available inside a
+  // Nitro runtime (and therefore inside `"use step"` functions when running
+  // under the native Nitro v3 bundling), so they appear unimported in docs
+  // samples. Liberal types keep the type-checker happy without pulling in
+  // Nitro's full type surface.
+  function useStorage(base?: string): {
+    getItem(key: string): Promise<any>;
+    setItem(key: string, value: any): Promise<void>;
+    removeItem(key: string): Promise<void>;
+    getKeys(base?: string): Promise<string[]>;
+    clear(base?: string): Promise<void>;
+    [key: string]: any;
+  };
+  function useDatabase(name?: string): any;
+  function useRuntimeConfig(event?: any): any;
+}

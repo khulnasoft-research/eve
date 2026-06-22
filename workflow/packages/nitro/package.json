@@ -1,0 +1,45 @@
+{
+  "name": "@workflow/nitro",
+  "version": "5.0.0-beta.21",
+  "description": "Nitro integration for Workflow SDK",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/workflow.git",
+    "directory": "packages/nitro"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./vite": "./dist/vite.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "tsc --build --clean && rm -rf dist"
+  },
+  "dependencies": {
+    "@swc/core": "catalog:",
+    "@workflow/builders": "workspace:*",
+    "@workflow/core": "workspace:*",
+    "@workflow/rollup": "workspace:*",
+    "@workflow/swc-plugin": "workspace:*",
+    "@workflow/vite": "workspace:*",
+    "@workflow/web": "workspace:*",
+    "exsolve": "1.0.8",
+    "pathe": "2.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workflow/tsconfig": "workspace:*",
+    "nitro": "catalog:",
+    "vite": "7.3.2"
+  }
+}

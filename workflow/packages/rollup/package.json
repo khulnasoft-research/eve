@@ -1,0 +1,38 @@
+{
+  "name": "@workflow/rollup",
+  "version": "5.0.0-beta.21",
+  "description": "Rollup plugin for Workflow SDK",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/workflow.git",
+    "directory": "packages/rollup"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "tsc --build --clean && rm -rf dist"
+  },
+  "dependencies": {
+    "@swc/core": "catalog:",
+    "@workflow/builders": "workspace:*",
+    "@workflow/swc-plugin": "workspace:*",
+    "exsolve": "1.0.7"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workflow/tsconfig": "workspace:*",
+    "rollup": "^4.60.0"
+  }
+}

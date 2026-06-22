@@ -1,0 +1,332 @@
+import {
+  ERROR_SLUGS,
+  HookNotFoundError,
+  WorkflowRuntimeError,
+} from '@workflow/errors';
+import {
+  type Hook,
+  isLegacySpecVersion,
+  SPEC_VERSION_CURRENT,
+  SPEC_VERSION_LEGACY,
+  SPEC_VERSION_SUPPORTS_COMPRESSION,
+  type WorkflowInvokePayload,
+  type WorkflowRun,
+} from '@workflow/world';
+import { getRunCapabilities } from '../capabilities.js';
+import { type CryptoKey, importKey } from '../encryption.js';
+import { runtimeLogger } from '../logger.js';
+import {
+  dehydrateStepReturnValue,
+  hydrateStepArguments,
+  SerializationFormat,
+} from '../serialization.js';
+import { WEBHOOK_RESPONSE_WRITABLE } from '../symbols.js';
+import * as Attribute from '../telemetry/semantic-conventions.js';
+import { linkToTraceCarrier, trace } from '../telemetry.js';
+import { getWorldLazy } from './get-world-lazy.js';
+import { getWorkflowQueueName } from './helpers.js';
+import { safeWaitUntil, waitedUntil } from './wait-until.js';
+
+/**
+ * Internal helper that returns the hook, the associated workflow run,
+ * and the resolved encryption key.
+ */
+async function getHookByTokenWithKey(token: string): Promise<{
+  hook: Hook;
+  run: WorkflowRun;
+  encryptionKey: CryptoKey | undefined;
+}> {
+  const world = await getWorldLazy();
+  const hook = await world.hooks.getByToken(token);
+  const run = await world.runs.get(hook.runId);
+  const rawKey = await world.getEncryptionKeyForRun?.(run);
+  const encryptionKey = rawKey ? await importKey(rawKey) : undefined;
+  if (typeof hook.metadata !== 'undefined') {
+    hook.metadata = await hydrateStepArguments(
+      hook.metadata as any,
+      hook.runId,
+      encryptionKey
+    );
+  }
+  return { hook, run, encryptionKey };
+}
+
+/**
+ * Get the hook by token to find the associated workflow run,
+ * and hydrate the `metadata` property if it was set from within
+ * the workflow run.
+ *
+ * @param token - The unique token identifying the hook
+ */
+export async function getHookByToken(token: string): Promise<Hook> {
+  const { hook } = await getHookByTokenWithKey(token);
+  return hook;
+}
+
+/**
+ * Resumes a workflow run by sending a payload to a hook identified by its token.
+ *
+ * This function is called externally (e.g., from an API route or server action)
+ * to send data to a hook and resume the associated workflow run.
+ *
+ * @param tokenOrHook - The unique token identifying the hook, or the hook object itself
+ * @param payload - The data payload to send to the hook
+ * @returns Promise resolving to the hook
+ * @throws Error if the hook is not found or if there's an error during the process
+ *
+ * @example
+ *
+ * ```ts
+ * // In an API route
+ * import { resumeHook } from '@workflow/core/runtime';
+ *
+ * export async function POST(request: Request) {
+ *   const { token, data } = await request.json();
+ *
+ *   try {
+ *     const hook = await resumeHook(token, data);
+ *     return Response.json({ runId: hook.runId });
+ *   } catch (error) {
+ *     return new Response('Hook not found', { status: 404 });
+ *   }
+ * }
+ * ```
+ */
+export async function resumeHook<T = any>(
+  tokenOrHook: string | Hook,
+  payload: T,
+  encryptionKeyOverride?: CryptoKey
+): Promise<Hook> {
+  return await waitedUntil(() => {
+    return trace('hook.resume', async (span) => {
+      const world = await getWorldLazy();
+
+      try {
+        let hook: Hook;
+        let workflowRun: WorkflowRun;
+        let encryptionKey: CryptoKey | undefined;
+        if (typeof tokenOrHook === 'string') {
+          const result = await getHookByTokenWithKey(tokenOrHook);
+          hook = result.hook;
+          workflowRun = result.run;
+          encryptionKey = encryptionKeyOverride ?? result.encryptionKey;
+        } else {
+          hook = tokenOrHook;
+          workflowRun = await world.runs.get(hook.runId);
+          if (encryptionKeyOverride) {
+            encryptionKey = encryptionKeyOverride;
+          } else {
+            const rawKey = await world.getEncryptionKeyForRun?.(workflowRun);
+            encryptionKey = rawKey ? await importKey(rawKey) : undefined;
+          }
+        }
+
+        span?.setAttributes({
+          ...Attribute.HookToken(hook.token),
+          ...Attribute.HookId(hook.hookId),
+          ...Attribute.WorkflowRunId(hook.runId),
+        });
+
+        // Check the target run's capabilities to ensure we encode the
+        // payload in a format the run's deployment can decode. For example,
+        // runs created before encryption support was added cannot decode
+        // the 'encr' serialization format, and runs created before
+        // byte-stream framing support cannot decode framed byte streams.
+        const rawVersion = workflowRun.executionContext?.workflowCoreVersion;
+        const capabilities = getRunCapabilities(
+          typeof rawVersion === 'string' ? rawVersion : undefined
+        );
+        if (!capabilities.supportedFormats.has(SerializationFormat.ENCRYPTED)) {
+          encryptionKey = undefined;
+        }
+
+        // Compress the payload only when the target run is marked as
+        // possibly containing compressed payloads (specVersion >= 5) AND
+        // its deployment can decode the 'gzip' format.
+        const compression =
+          (workflowRun.specVersion ?? 0) >= SPEC_VERSION_SUPPORTS_COMPRESSION &&
+          capabilities.supportedFormats.has(SerializationFormat.GZIP);
+
+        // Dehydrate the payload for storage
+        const ops: Promise<any>[] = [];
+        const v1Compat = isLegacySpecVersion(hook.specVersion);
+        const dehydratedPayload = await dehydrateStepReturnValue(
+          payload,
+          hook.runId,
+          encryptionKey,
+          ops,
+          globalThis,
+          v1Compat,
+          capabilities.framedByteStreams,
+          compression
+        );
+        // These payload-stream ops are flushed in the background; the
+        // promise handed to waitUntil must never reject (an unconsumed
+        // waitUntil rejection crashes the process as unhandledRejection),
+        // so unexpected failures are logged instead.
+        // NOTE: rejections with `undefined` are an expected artifact of the
+        // webhook bundle and are ignored entirely.
+        safeWaitUntil(Promise.all(ops), (err) => {
+          if (err === undefined) return;
+          runtimeLogger.warn('Background flush of hook payload ops failed', {
+            workflowRunId: hook.runId,
+            hookId: hook.hookId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+        // Create a hook_received event with the payload
+        await world.events.create(
+          hook.runId,
+          {
+            eventType: 'hook_received',
+            specVersion: SPEC_VERSION_CURRENT,
+            correlationId: hook.hookId,
+            eventData: {
+              ...(v1Compat ? {} : { token: hook.token }),
+              payload: dehydratedPayload,
+            },
+          },
+          { v1Compat }
+        );
+
+        span?.setAttributes({
+          ...Attribute.WorkflowName(workflowRun.workflowName),
+        });
+
+        // Link to the run-origin context from the workflow run's stored
+        // trace carrier (skipped when absent or invalid).
+        const originLink = await linkToTraceCarrier(
+          workflowRun.executionContext?.traceCarrier
+        );
+        if (originLink) {
+          span?.addLink?.(originLink);
+        }
+
+        // Re-trigger the workflow against the deployment ID associated
+        // with the workflow run that the hook belongs to
+        await world.queue(
+          getWorkflowQueueName(workflowRun.workflowName),
+          {
+            runId: hook.runId,
+            // attach the trace carrier from the workflow run
+            traceCarrier:
+              workflowRun.executionContext?.traceCarrier ?? undefined,
+          } satisfies WorkflowInvokePayload,
+          {
+            deploymentId: workflowRun.deploymentId,
+            specVersion: workflowRun.specVersion ?? SPEC_VERSION_LEGACY,
+          }
+        );
+
+        return hook;
+      } catch (err) {
+        span?.setAttributes({
+          ...Attribute.HookToken(
+            typeof tokenOrHook === 'string' ? tokenOrHook : tokenOrHook.token
+          ),
+          ...Attribute.HookFound(false),
+        });
+        throw err;
+      }
+    });
+  });
+}
+
+/**
+ * Resumes a webhook by sending a {@link https://developer.mozilla.org/en-US/docs/Web/API/Request | Request}
+ * object to a hook identified by its token.
+ *
+ * This function is called externally (e.g., from an API route or server action)
+ * to send a request to a webhook and resume the associated workflow run.
+ *
+ * @param token - The unique token identifying the hook
+ * @param request - The request to send to the hook
+ * @returns Promise resolving to the response
+ * @throws Error if the hook is not found or if there's an error during the process
+ *
+ * @example
+ *
+ * ```ts
+ * // In an API route
+ * import { resumeWebhook } from '@workflow/core/runtime';
+ *
+ * export async function POST(request: Request) {
+ *   const url = new URL(request.url);
+ *   const token = url.searchParams.get('token');
+ *
+ *   if (!token) {
+ *     return new Response('Missing token', { status: 400 });
+ *   }
+ *
+ *   try {
+ *     const response = await resumeWebhook(token, request);
+ *     return response;
+ *   } catch (error) {
+ *     return new Response('Webhook not found', { status: 404 });
+ *   }
+ * }
+ * ```
+ */
+export async function resumeWebhook(
+  token: string,
+  request: Request
+): Promise<Response> {
+  const { hook, encryptionKey } = await getHookByTokenWithKey(token);
+
+  // Only webhooks can be resumed via the public endpoint.
+  // If the hook was created via createHook() (isWebhook !== true),
+  // throw the same "not found" error the world would throw for a missing
+  // token. This prevents leaking that the token is valid.
+  if (hook.isWebhook === false) {
+    throw new HookNotFoundError(token);
+  }
+
+  let response: Response | undefined;
+  let responseReadable: ReadableStream<Response> | undefined;
+  if (
+    hook.metadata &&
+    typeof hook.metadata === 'object' &&
+    'respondWith' in hook.metadata
+  ) {
+    if (hook.metadata.respondWith === 'manual') {
+      const { readable, writable } = new TransformStream<Response, Response>();
+      responseReadable = readable;
+
+      // The request instance includes the writable stream which will be used
+      // to write the response to the client from within the workflow run
+      (request as any)[WEBHOOK_RESPONSE_WRITABLE] = writable;
+    } else if (hook.metadata.respondWith instanceof Response) {
+      response = hook.metadata.respondWith;
+    } else {
+      throw new WorkflowRuntimeError(
+        `Invalid \`respondWith\` value: ${hook.metadata.respondWith}`,
+        { slug: ERROR_SLUGS.WEBHOOK_INVALID_RESPOND_WITH_VALUE }
+      );
+    }
+  } else {
+    // No `respondWith` value implies the default behavior of returning a 202
+    response = new Response(null, { status: 202 });
+  }
+
+  await resumeHook(hook, request, encryptionKey);
+
+  if (responseReadable) {
+    // Wait for the readable stream to emit one chunk,
+    // which is the `Response` object
+    const reader = responseReadable.getReader();
+    const chunk = await reader.read();
+    if (chunk.value) {
+      response = chunk.value;
+    }
+    reader.cancel();
+  }
+
+  if (!response) {
+    throw new WorkflowRuntimeError('Workflow run did not send a response', {
+      slug: ERROR_SLUGS.WEBHOOK_RESPONSE_NOT_SENT,
+    });
+  }
+
+  return response;
+}

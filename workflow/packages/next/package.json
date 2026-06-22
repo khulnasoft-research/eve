@@ -1,0 +1,60 @@
+{
+  "name": "@workflow/next",
+  "version": "5.0.0-beta.21",
+  "description": "Next.js integration for Workflow SDK",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "docs/**/*"
+  ],
+  "directories": {
+    "doc": "./docs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/workflow.git",
+    "directory": "packages/next"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./loader": "./dist/loader.js",
+    "./runtime": "./dist/runtime.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run src",
+    "clean": "tsc --build --clean && rm -rf dist docs",
+    "prepack": "mkdir -p docs && cp ../../docs/content/docs/v5/getting-started/next.mdx ./docs/ && cp -r ../../docs/content/docs/v5/api-reference/workflow-next ./docs/api-reference",
+    "postpack": "rm -rf docs"
+  },
+  "dependencies": {
+    "@swc/core": "catalog:",
+    "@workflow/builders": "workspace:*",
+    "@workflow/core": "workspace:*",
+    "@workflow/swc-plugin": "workspace:*",
+    "semver": "catalog:",
+    "watchpack": "2.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/semver": "7.7.1",
+    "@types/watchpack": "2.4.4",
+    "@workflow/tsconfig": "workspace:*",
+    "next": "16.2.1",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "next": ">13"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  }
+}

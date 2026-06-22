@@ -1,0 +1,373 @@
+/**
+ * OpenTelemetry semantic conventions for Vercel Workflow telemetry.
+ *
+ * This module provides standardized telemetry attributes following OpenTelemetry semantic conventions
+ * for instrumenting workflow execution, step processing, and related operations. Each exported function
+ * creates a properly formatted attribute object that can be used with OpenTelemetry spans.
+ *
+ * The semantic conventions are organized into several categories:
+ * - **Workflow attributes**: Track workflow lifecycle, status, and metadata
+ * - **Step attributes**: Monitor individual step execution, retries, and results
+ * - **Queue attributes**: Instrument message queue operations
+ * - **Deployment attributes**: Capture deployment environment information
+ *
+ * All attribute functions are type-safe and leverage existing backend types to ensure
+ * consistency between telemetry data and actual system state.
+ *
+ * @example
+ * ```typescript
+ * import * as Attribute from './telemetry/semantic-conventions.js';
+ *
+ * // Set workflow attributes on a span
+ * span.setAttributes({
+ *   ...Attribute.WorkflowName('my-workflow'),
+ *   ...Attribute.WorkflowOperation('start'),
+ *   ...Attribute.WorkflowRunStatus('running'),
+ * });
+ *
+ * // Set step attributes
+ * span.setAttributes({
+ *   ...Attribute.StepName('process-data'),
+ *   ...Attribute.StepStatus('completed'),
+ *   ...Attribute.StepAttempt(1),
+ * });
+ * ```
+ *
+ * @see {@link https://opentelemetry.io/docs/specs/semconv/} OpenTelemetry Semantic Conventions
+ * @packageDocumentation
+ */
+
+import type { MessageId, Step, WorkflowRun } from '@workflow/world';
+
+/**
+ * Creates a semantic convention function that returns an attribute object.
+ * @param name - The attribute name following OpenTelemetry semantic conventions
+ * @returns A function that takes a value and returns an attribute object
+ */
+function SemanticConvention<T>(...names: string[]) {
+  return (value: T) =>
+    Object.fromEntries(names.map((name) => [name, value] as const));
+}
+
+// Workflow attributes
+
+/** The name of the workflow being executed */
+export const WorkflowName = SemanticConvention<string>('workflow.name');
+
+/** The operation being performed on the workflow */
+export const WorkflowOperation = SemanticConvention<
+  'start' | 'execute' | 'execute_v2' | 'run'
+>('workflow.operation');
+
+/** Unique identifier for a specific workflow run instance */
+export const WorkflowRunId = SemanticConvention<string>('workflow.run.id');
+
+/** Current status of the workflow run */
+export const WorkflowRunStatus = SemanticConvention<
+  WorkflowRun['status'] | 'workflow_suspended'
+>('workflow.run.status');
+
+/** Timestamp when the workflow execution started (Unix timestamp) */
+export const WorkflowStartedAt = SemanticConvention<number>(
+  'workflow.started_at'
+);
+
+/** Number of events processed during workflow execution */
+export const WorkflowEventsCount = SemanticConvention<number>(
+  'workflow.events.count'
+);
+
+/** Number of arguments passed to the workflow */
+export const WorkflowArgumentsCount = SemanticConvention<number>(
+  'workflow.arguments.count'
+);
+
+/** Type of the workflow result */
+export const WorkflowResultType = SemanticConvention<string>(
+  'workflow.result.type'
+);
+
+/** Whether trace context was propagated to this workflow execution */
+export const WorkflowTracePropagated = SemanticConvention<boolean>(
+  'workflow.trace.propagated'
+);
+
+/** Active trace-correlation mode for this invocation (linked or continuous) */
+export const WorkflowTraceMode = SemanticConvention<'linked' | 'continuous'>(
+  'workflow.trace.mode'
+);
+
+/** Name of the error that caused workflow failure */
+export const WorkflowErrorName = SemanticConvention<string>(
+  'workflow.error.name'
+);
+
+/** Error message when workflow fails */
+export const WorkflowErrorMessage = SemanticConvention<string>(
+  'workflow.error.message'
+);
+
+/** Error classification code (USER_ERROR, RUNTIME_ERROR, etc.) */
+export const WorkflowErrorCode = SemanticConvention<string>(
+  'workflow.error.code'
+);
+
+/** Number of steps created during workflow execution */
+export const WorkflowStepsCreated = SemanticConvention<number>(
+  'workflow.steps.created'
+);
+
+/** Number of hooks created during workflow execution */
+export const WorkflowHooksCreated = SemanticConvention<number>(
+  'workflow.hooks.created'
+);
+
+/** Number of waits created during workflow execution */
+export const WorkflowWaitsCreated = SemanticConvention<number>(
+  'workflow.waits.created'
+);
+
+// Step attributes
+
+/** Name of the step function being executed */
+export const StepName = SemanticConvention<string>('step.name');
+
+/** Unique identifier for the step instance */
+export const StepId = SemanticConvention<string>('step.id');
+
+/** Current attempt number for step execution (starts at 1) */
+export const StepAttempt = SemanticConvention<number>('step.attempt');
+
+/** Current status of the step */
+export const StepStatus = SemanticConvention<Step['status']>('step.status');
+
+/** Maximum number of retries allowed for this step */
+export const StepMaxRetries = SemanticConvention<number>('step.max_retries');
+
+/** Whether trace context was propagated to this step execution */
+export const StepTracePropagated = SemanticConvention<boolean>(
+  'step.trace.propagated'
+);
+
+/** Whether the step was skipped during execution */
+export const StepSkipped = SemanticConvention<boolean>('step.skipped');
+
+/** Reason why the step was skipped */
+export const StepSkipReason =
+  SemanticConvention<Step['status']>('step.skip_reason');
+
+/** Number of arguments passed to the step function */
+export const StepArgumentsCount = SemanticConvention<number>(
+  'step.arguments.count'
+);
+
+/** Type of the step result */
+export const StepResultType = SemanticConvention<string>('step.result.type');
+
+/** Name of the error that caused step failure */
+export const StepErrorName = SemanticConvention<string>('step.error.name');
+
+/** Error message when step fails */
+export const StepErrorMessage =
+  SemanticConvention<string>('step.error.message');
+
+/** Whether the step failed with a fatal error (no retries) */
+export const StepFatalError = SemanticConvention<boolean>('step.fatal_error');
+
+/** Whether all retry attempts have been exhausted */
+export const StepRetryExhausted = SemanticConvention<boolean>(
+  'step.retry.exhausted'
+);
+
+/** Number of seconds to wait before next retry attempt */
+export const StepRetryTimeoutSeconds = SemanticConvention<number>(
+  'step.retry.timeout_seconds'
+);
+
+/** Whether the step will be retried after this failure */
+export const StepRetryWillRetry = SemanticConvention<boolean>(
+  'step.retry.will_retry'
+);
+
+// Queue/Messaging attributes - Standard OTEL messaging conventions
+// See: https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/
+
+/** Messaging system identifier (standard OTEL: messaging.system) */
+export const MessagingSystem = SemanticConvention<string>('messaging.system');
+
+/** Destination name/queue name (standard OTEL: messaging.destination.name) */
+export const MessagingDestinationName = SemanticConvention<string>(
+  'messaging.destination.name'
+);
+
+/** The message id being handled (standard OTEL: messaging.message.id) */
+export const MessagingMessageId = SemanticConvention<MessageId>(
+  'messaging.message.id'
+);
+
+/** Operation type (standard OTEL: messaging.operation.type) */
+export const MessagingOperationType = SemanticConvention<
+  'publish' | 'receive' | 'process'
+>('messaging.operation.type');
+
+/** Time taken to enqueue the message in milliseconds (workflow-specific) */
+export const QueueOverheadMs = SemanticConvention<number>(
+  'workflow.queue.overhead_ms'
+);
+
+// Deployment attributes
+
+/** Unique identifier for the deployment environment */
+export const DeploymentId = SemanticConvention<string>('deployment.id');
+
+// Hook attributes
+
+/** Token identifying a specific hook */
+export const HookToken = SemanticConvention<string>('workflow.hook.token');
+
+/** Unique identifier for a hook instance */
+export const HookId = SemanticConvention<string>('workflow.hook.id');
+
+/** Whether a hook was found by its token */
+export const HookFound = SemanticConvention<boolean>('workflow.hook.found');
+
+// Webhook attributes
+
+/** Number of webhook handlers triggered */
+export const WebhookHandlersTriggered = SemanticConvention<number>(
+  'webhook.handlers.triggered'
+);
+
+// Suspension attributes
+
+export const WorkflowSuspensionState = SemanticConvention<'suspended'>(
+  'workflow.suspension.state'
+);
+export const WorkflowSuspensionHookCount = SemanticConvention<number>(
+  'workflow.suspension.hook_count'
+);
+export const WorkflowSuspensionStepCount = SemanticConvention<number>(
+  'workflow.suspension.step_count'
+);
+export const WorkflowSuspensionWaitCount = SemanticConvention<number>(
+  'workflow.suspension.wait_count'
+);
+
+// World/Storage attributes - Standard OTEL HTTP conventions
+// See: https://opentelemetry.io/docs/specs/semconv/http/http-spans/
+
+/** HTTP request method (standard OTEL: http.request.method) */
+export const HttpRequestMethod = SemanticConvention<string>(
+  'http.request.method'
+);
+
+/** Full URL of the request (standard OTEL: url.full) */
+export const UrlFull = SemanticConvention<string>('url.full');
+
+/** Server hostname (standard OTEL: server.address) */
+export const ServerAddress = SemanticConvention<string>('server.address');
+
+/** Server port (standard OTEL: server.port) */
+export const ServerPort = SemanticConvention<number>('server.port');
+
+/** HTTP response status code (standard OTEL: http.response.status_code) */
+export const HttpResponseStatusCode = SemanticConvention<number>(
+  'http.response.status_code'
+);
+
+/** Error type when request fails (standard OTEL: error.type) */
+export const ErrorType = SemanticConvention<string>('error.type');
+
+// World-specific custom attributes (for workflow-specific context)
+
+/** Format used for parsing response body (cbor or json) */
+export const WorldParseFormat = SemanticConvention<'cbor' | 'json'>(
+  'workflow.world.parse.format'
+);
+
+// Event loading attributes
+
+/** Number of pagination pages loaded when fetching workflow events */
+export const WorkflowEventsPagesLoaded = SemanticConvention<number>(
+  'workflow.events.pages_loaded'
+);
+
+// Queue timing breakdown attributes (workflow-specific)
+
+/** Time spent deserializing the queue message in milliseconds */
+export const QueueDeserializeTimeMs = SemanticConvention<number>(
+  'workflow.queue.deserialize_time_ms'
+);
+
+/** Time spent executing the handler logic in milliseconds */
+export const QueueExecutionTimeMs = SemanticConvention<number>(
+  'workflow.queue.execution_time_ms'
+);
+
+/** Time spent serializing the response in milliseconds */
+export const QueueSerializeTimeMs = SemanticConvention<number>(
+  'workflow.queue.serialize_time_ms'
+);
+
+// Payload compression attributes (gzip codec, specVersion >= 5)
+//
+// Sizes are measured at the compression boundary: before encryption on the
+// write path and after decryption on the read path. They therefore reflect
+// compression's effect, not the at-rest size (which also includes the
+// ~28-byte `encr` envelope and, on some backends, base64 expansion).
+
+/** Whether this serialize/deserialize was a write or read. */
+export const SerializationOperation = SemanticConvention<
+  'serialize' | 'deserialize'
+>('workflow.serialization.operation');
+
+/** Whether a compression codec was applied (write) / present (read). */
+export const SerializationCompressed = SemanticConvention<boolean>(
+  'workflow.serialization.compressed'
+);
+
+/** Which compression codec applied / was present (`zstd`, `gzip`, or `none`). */
+export const SerializationCodec = SemanticConvention<'zstd' | 'gzip' | 'none'>(
+  'workflow.serialization.codec'
+);
+
+/** Logical (uncompressed, devalue-prefixed) payload size in bytes. */
+export const SerializationUncompressedBytes = SemanticConvention<number>(
+  'workflow.serialization.uncompressed_bytes'
+);
+
+/** Stored (post-compression, pre-encryption) payload size in bytes. */
+export const SerializationStoredBytes = SemanticConvention<number>(
+  'workflow.serialization.stored_bytes'
+);
+
+/** Fraction of bytes saved by compression (0..1); set only when compressed. */
+export const SerializationCompressionRatio = SemanticConvention<number>(
+  'workflow.serialization.compression_ratio'
+);
+
+// RPC/Peer Service attributes - For service maps and dependency tracking
+// See: https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/
+
+/** The remote service name for Datadog service maps (Datadog-specific: peer.service) */
+export const PeerService = SemanticConvention<string>('peer.service');
+
+/** RPC system identifier (standard OTEL: rpc.system) */
+export const RpcSystem = SemanticConvention<string>('rpc.system');
+
+/** RPC service name (standard OTEL: rpc.service) */
+export const RpcService = SemanticConvention<string>('rpc.service');
+
+/** RPC method name (standard OTEL: rpc.method) */
+export const RpcMethod = SemanticConvention<string>('rpc.method');
+
+// Error attributes - Standard OTEL error conventions
+// See: https://opentelemetry.io/docs/specs/semconv/exceptions/exceptions-spans/
+
+/** Whether the error is retryable (workflow-specific) */
+export const ErrorRetryable = SemanticConvention<boolean>('error.retryable');
+
+/** Error category (workflow-specific: fatal, retryable, transient) */
+export const ErrorCategory = SemanticConvention<
+  'fatal' | 'retryable' | 'transient'
+>('error.category');

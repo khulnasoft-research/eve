@@ -1,0 +1,49 @@
+{
+  "name": "@workflow/typescript-plugin",
+  "version": "5.0.0-beta.4",
+  "description": "TypeScript Language Service Plugin for Workflow SDK",
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/workflow.git",
+    "directory": "packages/typescript-plugin"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "tsc --build --clean && rm -r dist ||:",
+    "test": "vitest run src",
+    "test:watch": "vitest watch src",
+    "test:coverage": "vitest run src --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "typescript",
+    "language-service-plugin",
+    "workflow",
+    "vercel"
+  ],
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "@workflow/core": "workspace:*",
+    "@workflow/tsconfig": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

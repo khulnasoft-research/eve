@@ -1,0 +1,44 @@
+.workflow-data
+node_modules
+/packages/*/dist
+.vercel
+.turbo
+.nuxt
+
+# This is a hack to get around the fact that `pnpm install`
+# does not run create the "bin" symlink if the file does not exist
+!packages/cli/dist/index.js
+.env*.local
+
+# Single letter one-off scratch scripts
+?.ts
+?.mjs
+
+# Rust
+
+/target
+^target/
+target
+# compiled wasm
+*.wasm
+# swc-plugin build hash
+packages/swc-plugin-workflow/build-hash.json
+
+# SWC plugin cache
+.swc
+
+# claude local settings
+.claude/settings.local.json
+.claude/worktrees
+
+# jj
+.jj/
+
+.next
+
+.DS_Store
+
+# Generated manifest files copied to static asset directories by builders
+workbench/nextjs-*/public/.well-known/workflow
+workbench/sveltekit/static/.well-known/workflow
+
