@@ -1,0 +1,587 @@
+# sandbox
+
+## 3.2.2
+
+### Patch Changes
+
+- Bump `ws` from `^8.18.3` to `^8.21.0` to address CVE-2026-48779, a high-severity memory exhaustion DoS triggered by a high volume of tiny fragments and data chunks. ([#228](https://github.com/vercel/sandbox/pull/228))
+
+## 3.2.1
+
+### Patch Changes
+
+- Fix scope inference failing with a raw Zod validation error. Teams missing `updatedAt` are now kept and malformed team entries are skipped. The CLI also no longer leaks raw validation details when scope can't be determined, showing a friendly hint instead. OAuth response parse failures are masked the same way. ([#225](https://github.com/vercel/sandbox/pull/225))
+
+- Prettify timeout and API errors. Unknown errors print a single line; set `DEBUG=sandbox:errors` to see the full stack. ([#226](https://github.com/vercel/sandbox/pull/226))
+
+- Updated dependencies [[`d57891c7552f872a0ce659b4b55aaa8d85415a2f`](https://github.com/vercel/sandbox/commit/d57891c7552f872a0ce659b4b55aaa8d85415a2f)]:
+  - @vercel/sandbox@2.2.1
+
+## 3.2.0
+
+### Minor Changes
+
+- Move the interactive shell server out of the sandbox and into the sandbox-controller. `sandbox connect`/`ssh` (CLI) and the new `Sandbox.openInteractive()` (SDK) now request a WebSocket URL and token from the API and connect to the controller-hosted PTY, instead of installing and bootstrapping the `vc-interactive-server` binary inside the sandbox at connect time. This removes the bundled server binary along with the `@vercel/pty-tunnel` and `@vercel/pty-tunnel-server` packages. ([#222](https://github.com/vercel/sandbox/pull/222))
+
+### Patch Changes
+
+- Updated dependencies [[`4b8970d53239f50384063ddd8690ff0091f5eaa0`](https://github.com/vercel/sandbox/commit/4b8970d53239f50384063ddd8690ff0091f5eaa0), [`b37dcabfa323a1a8a13c5479dce8c28dcdbce7f4`](https://github.com/vercel/sandbox/commit/b37dcabfa323a1a8a13c5479dce8c28dcdbce7f4)]:
+  - @vercel/sandbox@2.2.0
+
+## 3.1.2
+
+### Patch Changes
+
+- Update Undici version to fix incompatibility with Node.js 26 ([#220](https://github.com/vercel/sandbox/pull/220))
+
+- Updated dependencies [[`3ba842a5d029177b11a619f3ae6c5b4b0dd8b215`](https://github.com/vercel/sandbox/commit/3ba842a5d029177b11a619f3ae6c5b4b0dd8b215)]:
+  - @vercel/sandbox@2.1.1
+
+## 3.1.1
+
+### Patch Changes
+
+- Fix `sandbox connect` hanging or failing on a stopped/resumed sandbox. The interactive shell now surfaces `attach()` failures instead of swallowing them once the connection handshake lands, always stops the spinner on teardown (so a failure can no longer hang the process), and includes the in-sandbox server's stderr when the interactive server exits early. The in-sandbox `vc-interactive-server` also health-checks a reused server before trusting a leftover config file, so a stale `/tmp/vercel/interactive/config.json` restored from a snapshot no longer causes it to connect to a dead socket. ([#215](https://github.com/vercel/sandbox/pull/215))
+
+## 3.1.0
+
+### Minor Changes
+
+- Add `timeoutMs` to `runCommand` (SDK) and a `--timeout <duration>` flag to `sandbox exec` (CLI). ([#212](https://github.com/vercel/sandbox/pull/212))
+
+### Patch Changes
+
+- Updated dependencies [[`e557536b5499c6f538f45c87c2592afcfd897f8f`](https://github.com/vercel/sandbox/commit/e557536b5499c6f538f45c87c2592afcfd897f8f)]:
+  - @vercel/sandbox@2.1.0
+
+## 3.0.2
+
+### Patch Changes
+
+- Retry the interactive shell WebSocket open on connection failure so `sandbox connect` recovers when the sandbox-router cache is briefly stale after a named-sandbox resume. ([#210](https://github.com/vercel/sandbox/pull/210))
+
+- Show the current snapshot's siblings in `snapshots tree`. The tree now reads the API's `anchor` node so snapshots sharing the current snapshot's parent are listed, and siblings are rendered by snapshot ID instead of source session ID. ([#211](https://github.com/vercel/sandbox/pull/211))
+
+- Updated dependencies [[`7a0cddea2848ad040a5281d6fd817cbc421ffc0e`](https://github.com/vercel/sandbox/commit/7a0cddea2848ad040a5281d6fd817cbc421ffc0e)]:
+  - @vercel/sandbox@2.0.2
+
+## 3.0.1
+
+### Patch Changes
+
+- Updated dependencies [[`b09b96042e017ac5ffe1d087ba583105167ac58c`](https://github.com/vercel/sandbox/commit/b09b96042e017ac5ffe1d087ba583105167ac58c)]:
+  - @vercel/sandbox@2.0.1
+
+## 3.0.0
+
+### Major Changes
+
+- Introduce long-lived sandboxes to the CLI ([#177](https://github.com/vercel/sandbox/pull/177))
+
+### Minor Changes
+
+- Support pagination (CLI and SDK) when listing sandboxes, snapshots, sessions ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Add `sandbox config ports` subcommand to update the sandbox's ports. ([#203](https://github.com/vercel/sandbox/pull/203))
+
+- Rename sandbox to session, namedSandbox to sandbox ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Support keepLastSnapshots feature for CLI and SDK ([#193](https://github.com/vercel/sandbox/pull/193))
+
+- Support default snapshot expiration for persistent sandboxes ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Refactor the sandbox update and deprecate old network-policy update ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Automatically scale memory to vcpu when updating ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Move to cursor pagination. Support new sortyBy parameter for lists. Support new statusUpdatedAt filter ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Add `Sandbox.fork(...)` to the SDK and `sandbox fork <source>` to the CLI for forking an existing sandbox into a new one. ([#205](https://github.com/vercel/sandbox/pull/205))
+
+- Remove support for blocking parameter in .stop() and default to always blocking. Improve CLI output when stopping a sandbox. ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Lists now unwrap the json and return the items and pagination fields directly ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Support snapshot tree pagination ([#191](https://github.com/vercel/sandbox/pull/191))
+
+- support new --name option for snapshots list, support new --stop option for run ([#177](https://github.com/vercel/sandbox/pull/177))
+
+### Patch Changes
+
+- Default to `--sort-by=name` when using `--name-prefix` in `sandbox ls` ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Fix resume race-condition ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Add support for patch + delete v2 endpoints for named sandboxes. ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Add support for tags ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Fix transient 401 on the first sandbox command after auto-login by retrying the command when the token was just obtained, to absorb cross-region auth token replication lag. ([#192](https://github.com/vercel/sandbox/pull/192))
+
+- Add Node 26 support. ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Fix bug where the first ssh connection hang ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Improve timeout hour format and example values ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Support updading current-snapshot-id of an existing sandbox ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Add support for updating tags and displaying tags in config. ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Fix JsDocs, messages and double-error message bug ([#177](https://github.com/vercel/sandbox/pull/177))
+
+- Updated dependencies [[`87ddf050b0e196278becaf3550ee2857afa63c5d`](https://github.com/vercel/sandbox/commit/87ddf050b0e196278becaf3550ee2857afa63c5d), [`4a0ff5fb141597ff536b0ff900d595b92e8a6a6e`](https://github.com/vercel/sandbox/commit/4a0ff5fb141597ff536b0ff900d595b92e8a6a6e), [`f3b01827c3af58aecdcf70ce5247346cbd706654`](https://github.com/vercel/sandbox/commit/f3b01827c3af58aecdcf70ce5247346cbd706654), [`d9f6e1ca6f376a53ec9d0a81cc90a1323daa758b`](https://github.com/vercel/sandbox/commit/d9f6e1ca6f376a53ec9d0a81cc90a1323daa758b), [`88cfb449d6bef767bca1967ec371fdb8b9d7d48d`](https://github.com/vercel/sandbox/commit/88cfb449d6bef767bca1967ec371fdb8b9d7d48d), [`2ddaa6f794a409a140a2918910ccdaa1148ae4bc`](https://github.com/vercel/sandbox/commit/2ddaa6f794a409a140a2918910ccdaa1148ae4bc), [`087d659d40f06adac8e7b66f287c6424ec70539d`](https://github.com/vercel/sandbox/commit/087d659d40f06adac8e7b66f287c6424ec70539d), [`d06dbdc459917d8ab8ebde151a113c5124a2a49c`](https://github.com/vercel/sandbox/commit/d06dbdc459917d8ab8ebde151a113c5124a2a49c), [`c6bd09c3f5bad4305ce64e5f1ef38746af0d0f7e`](https://github.com/vercel/sandbox/commit/c6bd09c3f5bad4305ce64e5f1ef38746af0d0f7e), [`b4d5514d4715a2613d22b13dd81d420c873cb160`](https://github.com/vercel/sandbox/commit/b4d5514d4715a2613d22b13dd81d420c873cb160), [`ecfb31fddea2368ba20ec30de5ef836819f6b706`](https://github.com/vercel/sandbox/commit/ecfb31fddea2368ba20ec30de5ef836819f6b706), [`39bc7be123fdd9393577d4adf663cfc1b5282399`](https://github.com/vercel/sandbox/commit/39bc7be123fdd9393577d4adf663cfc1b5282399), [`562978ea03265bc4e2318ff733e037ee61b8e446`](https://github.com/vercel/sandbox/commit/562978ea03265bc4e2318ff733e037ee61b8e446), [`e9b2276693c47e6e2e0f91200be9650d5dfbc7f8`](https://github.com/vercel/sandbox/commit/e9b2276693c47e6e2e0f91200be9650d5dfbc7f8), [`8e4e138a78f38df4c15fa9bcc8c902fda9d5e662`](https://github.com/vercel/sandbox/commit/8e4e138a78f38df4c15fa9bcc8c902fda9d5e662), [`2bef94691e38c4f74e28b73f5459d4496fcbd798`](https://github.com/vercel/sandbox/commit/2bef94691e38c4f74e28b73f5459d4496fcbd798), [`4732c8d52cc64d84194470920c1b5f0fcdc45911`](https://github.com/vercel/sandbox/commit/4732c8d52cc64d84194470920c1b5f0fcdc45911), [`bac116b960cc8b4cca5c90be81e3f1936bb51965`](https://github.com/vercel/sandbox/commit/bac116b960cc8b4cca5c90be81e3f1936bb51965), [`4debd21d0c734393735b0b1b632a400b4aed6bc8`](https://github.com/vercel/sandbox/commit/4debd21d0c734393735b0b1b632a400b4aed6bc8), [`864eb6f502ef8b54ab73c3e3a9f2c484152ca528`](https://github.com/vercel/sandbox/commit/864eb6f502ef8b54ab73c3e3a9f2c484152ca528), [`7d753e83149f99c5c4b97a8f426f5c0f2aa00161`](https://github.com/vercel/sandbox/commit/7d753e83149f99c5c4b97a8f426f5c0f2aa00161), [`473650e619b1062a0969351d7533bde1f60be342`](https://github.com/vercel/sandbox/commit/473650e619b1062a0969351d7533bde1f60be342), [`1db1d95343317e8d4ad8fcbbdf5f2a694dc28259`](https://github.com/vercel/sandbox/commit/1db1d95343317e8d4ad8fcbbdf5f2a694dc28259), [`4e1c6f5849cb65e1e7e1136a9f728fa84bd7d3fa`](https://github.com/vercel/sandbox/commit/4e1c6f5849cb65e1e7e1136a9f728fa84bd7d3fa), [`aab45e2a81147075ecfb8c7ad7749f607f5fc1ce`](https://github.com/vercel/sandbox/commit/aab45e2a81147075ecfb8c7ad7749f607f5fc1ce), [`cae4ba94b7aa2bf1abf89865e72c6fa038477081`](https://github.com/vercel/sandbox/commit/cae4ba94b7aa2bf1abf89865e72c6fa038477081), [`f618e137ede7b4d0605f20897ff27d9cccf0b5c4`](https://github.com/vercel/sandbox/commit/f618e137ede7b4d0605f20897ff27d9cccf0b5c4), [`e3f14b01e161576793a8ae3b276cc9cc84b0d7ea`](https://github.com/vercel/sandbox/commit/e3f14b01e161576793a8ae3b276cc9cc84b0d7ea)]:
+  - @vercel/sandbox@2.0.0
+
+## 3.0.0-beta.26
+
+### Minor Changes
+
+- Add `Sandbox.fork(...)` to the SDK and `sandbox fork <source>` to the CLI for forking an existing sandbox into a new one. The fork copies as many config parameters as the server exposes — `resources` (vcpus), `timeout`, `networkPolicy`, `tags`, `ports`, `persistent`, `snapshotExpiration`, `keepLastSnapshots` — and lets the caller override any of them. Environment variables are not copied (encrypted server-side) and must be re-supplied via `env` / `--env`. ([#205](https://github.com/vercel/sandbox/pull/205))
+
+  **Breaking**: removed `sandbox create --sandbox-snapshot <name>` and `Snapshot.fromSandbox(name)`. Use `sandbox fork <name>` / `Sandbox.fork({ sourceSandbox: name })` instead. Raw snapshot IDs are still supported via `sandbox create --snapshot <id>` and `Sandbox.create({ source: { type: "snapshot", snapshotId } })`.
+
+### Patch Changes
+
+- Updated dependencies [[`7d753e83149f99c5c4b97a8f426f5c0f2aa00161`](https://github.com/vercel/sandbox/commit/7d753e83149f99c5c4b97a8f426f5c0f2aa00161)]:
+  - @vercel/sandbox@2.0.0-beta.24
+
+## 3.0.0-beta.25
+
+### Minor Changes
+
+- Add `sandbox config ports` subcommand to update the sandbox's ports. ([#203](https://github.com/vercel/sandbox/pull/203))
+
+### Patch Changes
+
+- Updated dependencies [[`864eb6f502ef8b54ab73c3e3a9f2c484152ca528`](https://github.com/vercel/sandbox/commit/864eb6f502ef8b54ab73c3e3a9f2c484152ca528)]:
+  - @vercel/sandbox@2.0.0-beta.23
+
+## 3.0.0-beta.24
+
+### Minor Changes
+
+- Support snapshot tree pagination ([#191](https://github.com/vercel/sandbox/pull/191))
+
+### Patch Changes
+
+- Updated dependencies [[`88cfb449d6bef767bca1967ec371fdb8b9d7d48d`](https://github.com/vercel/sandbox/commit/88cfb449d6bef767bca1967ec371fdb8b9d7d48d), [`f618e137ede7b4d0605f20897ff27d9cccf0b5c4`](https://github.com/vercel/sandbox/commit/f618e137ede7b4d0605f20897ff27d9cccf0b5c4)]:
+  - @vercel/sandbox@2.0.0-beta.22
+
+## 3.0.0-beta.23
+
+### Minor Changes
+
+- Support keepLastSnapshots feature for CLI and SDK ([#193](https://github.com/vercel/sandbox/pull/193))
+
+### Patch Changes
+
+- Fix transient 401 on the first sandbox command after auto-login by retrying the command when the token was just obtained, to absorb cross-region auth token replication lag. ([#192](https://github.com/vercel/sandbox/pull/192))
+
+- Updated dependencies [[`c6bd09c3f5bad4305ce64e5f1ef38746af0d0f7e`](https://github.com/vercel/sandbox/commit/c6bd09c3f5bad4305ce64e5f1ef38746af0d0f7e)]:
+  - @vercel/sandbox@2.0.0-beta.21
+
+## 3.0.0-beta.22
+
+### Minor Changes
+
+- Support new CLI --sandbox-snapshot parameter and new SDK static method Snapshot.fromSandbox(<sandbox-name>) ([#189](https://github.com/vercel/sandbox/pull/189))
+
+### Patch Changes
+
+- Updated dependencies [[`4a0ff5fb141597ff536b0ff900d595b92e8a6a6e`](https://github.com/vercel/sandbox/commit/4a0ff5fb141597ff536b0ff900d595b92e8a6a6e), [`ecfb31fddea2368ba20ec30de5ef836819f6b706`](https://github.com/vercel/sandbox/commit/ecfb31fddea2368ba20ec30de5ef836819f6b706)]:
+  - @vercel/sandbox@2.0.0-beta.20
+
+## 3.0.0-beta.21
+
+### Patch Changes
+
+- Add Node 26 support. ([#181](https://github.com/vercel/sandbox/pull/181))
+
+- Updated dependencies [[`b4126273497e08057bec448e965f3f157856254b`](https://github.com/vercel/sandbox/commit/b4126273497e08057bec448e965f3f157856254b)]:
+  - @vercel/sandbox@2.0.0-beta.19
+
+## 3.0.0-beta.20
+
+### Patch Changes
+
+- Updated dependencies [[`0c62cab5ab16af355ca57d1a19ab1e6e70899060`](https://github.com/vercel/sandbox/commit/0c62cab5ab16af355ca57d1a19ab1e6e70899060)]:
+  - @vercel/sandbox@2.0.0-beta.18
+
+## 3.0.0-beta.19
+
+### Minor Changes
+
+- Support pagination (CLI and SDK) when listing sandboxes, snapshots, sessions
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.17
+
+## 3.0.0-beta.18
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.16
+
+## 3.0.0-beta.17
+
+### Minor Changes
+
+- Remove support for blocking parameter in .stop() and default to always blocking. Improve CLI output when stopping a sandbox.
+
+### Patch Changes
+
+- Improve timeout hour format and example values ([#156](https://github.com/vercel/sandbox/pull/156))
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.15
+
+## 3.0.0-beta.16
+
+### Patch Changes
+
+- Support updading current-snapshot-id of an existing sandbox
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.14
+
+## 3.0.0-beta.15
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.13
+
+## 3.0.0-beta.14
+
+### Minor Changes
+
+- Rebase from main
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.12
+
+## 3.0.0-beta.13
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.11
+
+## 3.0.0-beta.12
+
+### Minor Changes
+
+- Support default snapshot expiration for persistent sandboxes
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.10
+
+## 3.0.0-beta.11
+
+### Patch Changes
+
+- Default to `--sort-by=name` when using `--name-prefix` in `sandbox ls` ([#113](https://github.com/vercel/sandbox/pull/113))
+
+## 3.0.0-beta.10
+
+### Patch Changes
+
+- Add support for updating tags and display tags in config
+
+## 3.0.0-beta.9
+
+### Minor Changes
+
+- Move to cursor pagination. Support new sortyBy parameter for lists. Support new statusUpdatedAt filter
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.9
+
+## 3.0.0-beta.8
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.8
+
+## 3.0.0-beta.7
+
+### Patch Changes
+
+- Fix resume race-condition ([#97](https://github.com/vercel/sandbox/pull/97))
+
+- Fix bug where the first ssh connection hang ([#98](https://github.com/vercel/sandbox/pull/98))
+
+- Fix JsDocs, messages and double-error message bug ([#94](https://github.com/vercel/sandbox/pull/94))
+
+- Updated dependencies [[`d4ac7da0362f06e9095261eb36f802cf2c862b6d`](https://github.com/vercel/sandbox/commit/d4ac7da0362f06e9095261eb36f802cf2c862b6d), [`851f5106054adb4ff61806dded1712bf9c917451`](https://github.com/vercel/sandbox/commit/851f5106054adb4ff61806dded1712bf9c917451)]:
+  - @vercel/sandbox@2.0.0-beta.7
+
+## 3.0.0-beta.6
+
+### Minor Changes
+
+- Rename sandbox to session, namedSandbox to sandbox
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.5
+
+## 3.0.0-beta.5
+
+### Patch Changes
+
+- Add support for patch + delete v2 endpoints for named sandboxes.
+
+- Updated dependencies [[`67d41ad2c78913125c25d86acd9ee6a505170ca1`](https://github.com/vercel/sandbox/commit/67d41ad2c78913125c25d86acd9ee6a505170ca1)]:
+  - @vercel/sandbox@2.0.0-beta.4
+
+## 3.0.0-beta.4
+
+### Minor Changes
+
+- Support new --stop option for exec/run, support new --name option for snaphosts list
+
+- support new --name option for snapshots list, support new --stop option for run
+
+## 3.0.0-beta.3
+
+### Minor Changes
+
+- Automatically scale memory to vcpu when updating
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.3
+
+## 3.0.0-beta.2
+
+### Minor Changes
+
+- Refactor the sandbox update and deprecate old network-policy update
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.2
+
+## 3.0.0-beta.1
+
+### Major Changes
+
+- Introduce long-lived sandboxes to the CLI
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @vercel/sandbox@2.0.0-beta.1
+
+## 3.0.0-beta.0
+
+### Major Changes
+
+- Support named sandboxes
+
+## 2.5.12
+
+### Patch Changes
+
+- Add Node 26 support. ([#179](https://github.com/vercel/sandbox/pull/179))
+
+- Updated dependencies [[`6d905b4ddb4590c0b10a4522e3ed8f76019165fe`](https://github.com/vercel/sandbox/commit/6d905b4ddb4590c0b10a4522e3ed8f76019165fe)]:
+  - @vercel/sandbox@1.10.2
+
+## 2.5.11
+
+### Patch Changes
+
+- Improve timeout hour format and example values ([#150](https://github.com/vercel/sandbox/pull/150))
+
+- Updated dependencies [[`92725f07386f692c9492deff6ba4595fa754c465`](https://github.com/vercel/sandbox/commit/92725f07386f692c9492deff6ba4595fa754c465)]:
+  - @vercel/sandbox@1.10.1
+
+## 2.5.10
+
+### Patch Changes
+
+- Smarter fallback team selection for scope inference: tries `defaultTeamId` first, then the best hobby-plan OWNER team (personal team or most recently updated). Filters fallback candidates by `billing.plan === 'hobby'` to avoid selecting pro/enterprise teams. Skips teams that return 403 and shows a helpful error when no team allows sandbox creation. ([#120](https://github.com/vercel/sandbox/pull/120))
+
+- Updated dependencies [[`9dc0ac96d1d531b5a44786c92d6ddc2ce4890791`](https://github.com/vercel/sandbox/commit/9dc0ac96d1d531b5a44786c92d6ddc2ce4890791), [`494c2ddae5899b7f793cbd906a2a62260bd08885`](https://github.com/vercel/sandbox/commit/494c2ddae5899b7f793cbd906a2a62260bd08885), [`3fbabb95946771e41d8b17b7f8cb8d2972beba25`](https://github.com/vercel/sandbox/commit/3fbabb95946771e41d8b17b7f8cb8d2972beba25), [`42515e1ede4468fad204e5332ade0ee5d8dce3e5`](https://github.com/vercel/sandbox/commit/42515e1ede4468fad204e5332ade0ee5d8dce3e5)]:
+  - @vercel/sandbox@1.10.0
+
+## 2.5.9
+
+### Patch Changes
+
+- Updated dependencies [[`9555162f33690dfa18530aeca93af05188ebd2ed`](https://github.com/vercel/sandbox/commit/9555162f33690dfa18530aeca93af05188ebd2ed)]:
+  - @vercel/sandbox@1.9.3
+
+## 2.5.8
+
+### Patch Changes
+
+- Updated dependencies [[`b91b9e49fb7d2c5a4b601c07c125e6e5a2c43441`](https://github.com/vercel/sandbox/commit/b91b9e49fb7d2c5a4b601c07c125e6e5a2c43441)]:
+  - @vercel/sandbox@1.9.2
+
+## 2.5.7
+
+### Patch Changes
+
+- Updated dependencies [[`cf13a34221c2b83c25c73d94929d05e0a697aecf`](https://github.com/vercel/sandbox/commit/cf13a34221c2b83c25c73d94929d05e0a697aecf), [`772989c59a3c27efa98153cdc54b6e35c1c15eae`](https://github.com/vercel/sandbox/commit/772989c59a3c27efa98153cdc54b6e35c1c15eae), [`184cd42d8d3b1ea1df354529cb6ba103a33e18d3`](https://github.com/vercel/sandbox/commit/184cd42d8d3b1ea1df354529cb6ba103a33e18d3), [`451c42efb94ab9c9dc330b4742071ac01008044d`](https://github.com/vercel/sandbox/commit/451c42efb94ab9c9dc330b4742071ac01008044d)]:
+  - @vercel/sandbox@1.9.1
+
+## 2.5.6
+
+### Patch Changes
+
+- Updated dependencies [[`957eda3c1b03035a672bfdeb0addf52c3c78f837`](https://github.com/vercel/sandbox/commit/957eda3c1b03035a672bfdeb0addf52c3c78f837)]:
+  - @vercel/sandbox@1.9.0
+
+## 2.5.5
+
+### Patch Changes
+
+- Updated dependencies [[`ac49096ea505d658d6e255780c663765e7a309af`](https://github.com/vercel/sandbox/commit/ac49096ea505d658d6e255780c663765e7a309af)]:
+  - @vercel/sandbox@1.8.1
+
+## 2.5.4
+
+### Patch Changes
+
+- Add `--env/-e` support to `sandbox create` to set default environment variables inherited by sandbox commands. ([#70](https://github.com/vercel/sandbox/pull/70))
+
+- Updated dependencies [[`3aee2c734fc470fe41ee0c1fd9f4db6b83b3dcdc`](https://github.com/vercel/sandbox/commit/3aee2c734fc470fe41ee0c1fd9f4db6b83b3dcdc)]:
+  - @vercel/sandbox@1.8.0
+
+## 2.5.3
+
+### Patch Changes
+
+- Add `--vcpus` flag to `create` and `run` commands for configuring sandbox resources. ([#65](https://github.com/vercel/sandbox/pull/65))
+
+- Fix copying files to local path when not already present ([#64](https://github.com/vercel/sandbox/pull/64))
+
+## 2.5.2
+
+### Patch Changes
+
+- Fix 400 errors on interactions (connect, run-command, etc) ([#62](https://github.com/vercel/sandbox/pull/62))
+
+- Updated dependencies [[`b35a70030c0c58da49410aa599e1b2eecaad0438`](https://github.com/vercel/sandbox/commit/b35a70030c0c58da49410aa599e1b2eecaad0438)]:
+  - @vercel/sandbox@1.7.1
+
+## 2.5.1
+
+### Patch Changes
+
+- Fix 400 errors on interactions (connect, run-command, etc) ([#60](https://github.com/vercel/sandbox/pull/60))
+
+## 2.5.0
+
+### Minor Changes
+
+- Add resource usage for stopped sandboxes. ([#54](https://github.com/vercel/sandbox/pull/54))
+  Add blocking mode for `stop` function.
+
+### Patch Changes
+
+- Update to use `@vercel/oidc@3.2.0` utilities, removing duplicate auth logic and the local `JwtExpiry` class ([#34](https://github.com/vercel/sandbox/pull/34))
+
+- Updated dependencies [[`376a098243dddcee56c657b97856a0cd199113e0`](https://github.com/vercel/sandbox/commit/376a098243dddcee56c657b97856a0cd199113e0), [`46f0ed22f7128355942037321df70dc93481a50d`](https://github.com/vercel/sandbox/commit/46f0ed22f7128355942037321df70dc93481a50d), [`659c40e719b21740024ede84c176257714f0086b`](https://github.com/vercel/sandbox/commit/659c40e719b21740024ede84c176257714f0086b), [`35195578e5b5f68e7f9574b728ca7ff350bbad64`](https://github.com/vercel/sandbox/commit/35195578e5b5f68e7f9574b728ca7ff350bbad64)]:
+  - @vercel/sandbox@1.7.0
+
+## 2.4.0
+
+### Minor Changes
+
+- Add `sandbox snapshots get <snapshot_id>` command to retrieve details of a specific snapshot ([#44](https://github.com/vercel/sandbox/pull/44))
+
+- Add support for custom/infinite snapshots expiration ([#36](https://github.com/vercel/sandbox/pull/36))
+
+### Patch Changes
+
+- Fix table output not using the same width for each row ([#45](https://github.com/vercel/sandbox/pull/45))
+
+- change help format to match Vercel CLI h/t @allenzhou101 ([#47](https://github.com/vercel/sandbox/pull/47))
+
+- Updated dependencies [[`5b5f488db3fe7b8a7dad5d784617c5787e9ac1c0`](https://github.com/vercel/sandbox/commit/5b5f488db3fe7b8a7dad5d784617c5787e9ac1c0)]:
+  - @vercel/sandbox@1.6.0
+
+## 2.3.0
+
+### Minor Changes
+
+- Use new model for network-policies ([#33](https://github.com/vercel/sandbox/pull/33))
+
+### Patch Changes
+
+- Add aborted status to sandboxes ([`863637edae310f867c224cbd60958edda51f51a5`](https://github.com/vercel/sandbox/commit/863637edae310f867c224cbd60958edda51f51a5))
+
+- Updated dependencies [[`d36a202fbfa227d1b31b3bab83de510caad9afc9`](https://github.com/vercel/sandbox/commit/d36a202fbfa227d1b31b3bab83de510caad9afc9), [`8a2d58d5a87a7a53bae1fad705538bbbbc1cffef`](https://github.com/vercel/sandbox/commit/8a2d58d5a87a7a53bae1fad705538bbbbc1cffef), [`be9a26007aa51c735f6513f9bd78acceec6aec1c`](https://github.com/vercel/sandbox/commit/be9a26007aa51c735f6513f9bd78acceec6aec1c), [`863637edae310f867c224cbd60958edda51f51a5`](https://github.com/vercel/sandbox/commit/863637edae310f867c224cbd60958edda51f51a5)]:
+  - @vercel/sandbox@1.5.0
+
+## 2.2.0
+
+### Minor Changes
+
+- - `sandbox ssh <sandbox_id>` is now `sandbox connect <sandbox_id>`. Aliases are: `shell`, `ssh` for backward compact ([#27](https://github.com/vercel/sandbox/pull/27))
+  - `sandbox sh` is now `sandbox create --connect`
+
+  If the user runs `sandbox sh ...`, we also try to remap automatically to `sandbox create --connect` and print a warning
+
+### Patch Changes
+
+- parse API error response message from JSON body ([#24](https://github.com/vercel/sandbox/pull/24))
+
+- Updated dependencies [[`c666c245aa1af3bd1e1b516dc6d4620b04576c35`](https://github.com/vercel/sandbox/commit/c666c245aa1af3bd1e1b516dc6d4620b04576c35)]:
+  - @vercel/sandbox@1.4.1
+
+## 2.1.0
+
+### Minor Changes
+
+- Add support for network policies ([#22](https://github.com/vercel/sandbox/pull/22))
+
+### Patch Changes
+
+- Updated dependencies [[`a29131ecd3c7479b6eac5e2f2f0225523d41011b`](https://github.com/vercel/sandbox/commit/a29131ecd3c7479b6eac5e2f2f0225523d41011b)]:
+  - @vercel/sandbox@1.4.0
+
+## 2.0.4
+
+### Patch Changes
+
+- Display team and project info in a framed format after sandbox creation ([#18](https://github.com/vercel/sandbox/pull/18))
+
+## 2.0.3
+
+### Patch Changes
+
+- use a new OIDC token when refreshed, instead of relying on the old OIDC token pre-refresh ([#13](https://github.com/vercel/sandbox/pull/13))
+
+- Updated dependencies [[`01c8a27a874b772e7819051176a1345153d49e03`](https://github.com/vercel/sandbox/commit/01c8a27a874b772e7819051176a1345153d49e03)]:
+  - @vercel/sandbox@1.3.2
+
+## 2.0.2
+
+### Patch Changes
+
+- Add support for snapshots: ([#6](https://github.com/vercel/sandbox/pull/6))
+  ```
+  sandbox snapshot --stop <sandbox-id>
+  sandbox create --snapshot <snapshot-id>
+  sandbox snapshots list
+  sandbox snapshot delete <snapshot-id>
+  ```

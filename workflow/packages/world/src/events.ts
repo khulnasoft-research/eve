@@ -1,0 +1,557 @@
+import { z } from 'zod';
+import { AttributeChangesSchema } from './attributes.js';
+import { SerializedDataSchema } from './serialization.js';
+import type { PaginationOptions, ResolveData } from './shared.js';
+
+/**
+ * Fields within eventData that hold ref/payload data per event type.
+ * When resolveData is 'none', only these fields are stripped — all other
+ * metadata (stepName, workflowName, etc.) is preserved.
+ */
+export const EVENT_DATA_REF_FIELDS: Record<string, string[]> = {
+  run_created: ['input'],
+  run_completed: ['output'],
+  run_failed: ['error'],
+  step_created: ['input'],
+  step_completed: ['result'],
+  step_failed: ['error'],
+  step_retrying: ['error'],
+  hook_created: ['metadata'],
+  hook_received: ['payload'],
+};
+
+/**
+ * Strip ref/payload fields from eventData based on resolveData setting.
+ * When resolveData is 'none', removes only large data fields (refs) from
+ * eventData while preserving metadata like stepName, workflowName, etc.
+ */
+export function stripEventDataRefs(
+  event: Event,
+  resolveData: ResolveData
+): Event {
+  if (resolveData !== 'none') return event;
+  if (!('eventData' in event)) return event;
+
+  const eventData = (event as any).eventData;
+  if (!eventData || typeof eventData !== 'object') {
+    const { eventData: _, ...rest } = event as any;
+    return rest;
+  }
+
+  const refFields = EVENT_DATA_REF_FIELDS[event.eventType];
+  if (!refFields || refFields.length === 0) return event;
+
+  const stripped = { ...eventData };
+  for (const field of refFields) {
+    delete stripped[field];
+  }
+
+  const { eventData: _, ...rest } = event as any;
+  return {
+    ...rest,
+    ...(Object.keys(stripped).length > 0 ? { eventData: stripped } : {}),
+  };
+}
+
+// Event type enum
+export const EventTypeSchema = z.enum([
+  // Run lifecycle events
+  'run_created',
+  'run_started',
+  'run_completed',
+  'run_failed',
+  'run_cancelled',
+  // Run attribute events
+  'attr_set',
+  // Step lifecycle events
+  'step_created',
+  'step_completed',
+  'step_failed',
+  'step_retrying',
+  'step_started',
+  // Hook lifecycle events
+  'hook_created',
+  'hook_received',
+  'hook_disposed',
+  'hook_conflict', // Created by world when hook token already exists
+  // Wait lifecycle events
+  'wait_created',
+  'wait_completed',
+]);
+
+// Base event schema with common properties
+// TODO: Event data on all specific event schemas can actually be undefined,
+// as the world may omit eventData when resolveData is set to 'none'.
+// Changing the type here will mainly improve type safety for o11y consumers.
+// Note: specVersion is optional for backwards compatibility with legacy data in storage,
+// but is always sent by the runtime on new events.
+export const BaseEventSchema = z.object({
+  eventType: EventTypeSchema,
+  correlationId: z.string().optional(),
+  specVersion: z.number().optional(),
+});
+
+// Event schemas (shared between creation requests and server responses)
+// Note: Serialized data fields use SerializedDataSchema to support both:
+// - specVersion >= 2: Uint8Array (binary devalue format)
+// - specVersion 1: any (legacy JSON format)
+const StepCompletedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('step_completed'),
+  correlationId: z.string(),
+  eventData: z.object({
+    stepName: z.string().optional(),
+    // Carried so a backend that keys payload refs by workflow name can build
+    // the key without an extra run lookup on this hot per-step write.
+    // Optional: older runtimes omit it and the backend falls back to a read.
+    workflowName: z.string().optional(),
+    result: SerializedDataSchema,
+  }),
+});
+
+const StepFailedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('step_failed'),
+  correlationId: z.string(),
+  eventData: z.object({
+    stepName: z.string().optional(),
+    // The thrown value, serialized via the workflow serialization pipeline.
+    // Can be any JavaScript value (string, number, object, Error, etc.)
+    error: SerializedDataSchema,
+  }),
+});
+
+/**
+ * Event created when a step fails and will be retried.
+ * Sets the step status back to 'pending' and records the error.
+ * The error is stored in step.error for debugging.
+ */
+const StepRetryingEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('step_retrying'),
+  correlationId: z.string(),
+  eventData: z.object({
+    stepName: z.string().optional(),
+    // The thrown value, serialized via the workflow serialization pipeline.
+    // Can be any JavaScript value (string, number, object, Error, etc.)
+    error: SerializedDataSchema,
+    retryAfter: z.coerce.date().optional(),
+  }),
+});
+
+/**
+ * Event created when a step begins executing.
+ * Transitions the step entity to status 'running' and increments its attempt.
+ *
+ * The optional `stepName` + `input` carry step creation data for the lazy-start
+ * path: when a handler owns a step it is about to run inline (the owned-inline
+ * path in the runtime), it can skip the separate `step_created` round-trip and
+ * send only `step_started` carrying the step input. The World implementation
+ * then atomically creates the step (materializing the step entity and writing a
+ * synthetic `step_created` event so replay still observes it) before starting
+ * it. This mirrors the resilient `run_started` start path above. When `input`
+ * is absent the World requires a prior `step_created` (the legacy contract).
+ */
+const StepStartedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('step_started'),
+  correlationId: z.string(),
+  eventData: z
+    .object({
+      stepName: z.string().optional(),
+      attempt: z.number().optional(),
+      // Carried on the lazy-start path (where `input` is present) so the
+      // backend can build the payload ref key without re-reading the run.
+      workflowName: z.string().optional(),
+      // Lazy-start: the dehydrated step input, present only when this
+      // step_started is also responsible for creating the step.
+      input: SerializedDataSchema.optional(),
+    })
+    .optional(),
+});
+
+/**
+ * Event created when a step is first invoked. The World implementation
+ * atomically creates both the event and the step entity.
+ */
+const StepCreatedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('step_created'),
+  correlationId: z.string(),
+  eventData: z.object({
+    stepName: z.string(),
+    workflowName: z.string().optional(),
+    input: SerializedDataSchema,
+  }),
+});
+
+/**
+ * Event created when a hook is first invoked. The World implementation
+ * atomically creates both the event and the hook entity.
+ */
+const HookCreatedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('hook_created'),
+  correlationId: z.string(),
+  eventData: z.object({
+    token: z.string(),
+    metadata: SerializedDataSchema.optional(),
+    isWebhook: z.boolean().optional(),
+    isSystem: z.boolean().optional(),
+  }),
+});
+
+const HookReceivedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('hook_received'),
+  correlationId: z.string(),
+  eventData: z.object({
+    token: z.string().optional(),
+    payload: SerializedDataSchema,
+  }),
+});
+
+const HookDisposedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('hook_disposed'),
+  correlationId: z.string(),
+  eventData: z
+    .object({
+      token: z.string().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * Event created by World implementations when a hook_created request
+ * conflicts with an existing hook token. This event is NOT user-creatable -
+ * it is only returned by the World when a token conflict is detected.
+ *
+ * When the hook consumer sees this event, it should reject any awaited
+ * promises with a HookTokenConflictError.
+ */
+const HookConflictEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('hook_conflict'),
+  correlationId: z.string(),
+  eventData: z.object({
+    token: z.string(),
+    // TODO: Make this required once all persisted hook_conflict events and
+    // remote World implementations always include the active hook owner's run ID.
+    conflictingRunId: z.string().optional(),
+  }),
+});
+
+const WaitCreatedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('wait_created'),
+  correlationId: z.string(),
+  eventData: z.object({
+    resumeAt: z.coerce.date(),
+  }),
+});
+
+const WaitCompletedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('wait_completed'),
+  correlationId: z.string(),
+  eventData: z
+    .object({
+      resumeAt: z.coerce.date().optional(),
+    })
+    .optional(),
+});
+
+const AttributeWriterSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('workflow'),
+  }),
+  z.object({
+    type: z.literal('step'),
+    stepId: z.string(),
+    attempt: z.number(),
+  }),
+]);
+
+/**
+ * Event created when workflow or step code changes the run's plaintext
+ * attributes. The World materializes changes into `run.attributes`.
+ */
+const AttrSetEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('attr_set'),
+  correlationId: z.string().optional(),
+  eventData: z.object({
+    changes: AttributeChangesSchema,
+    writer: AttributeWriterSchema,
+    allowReservedAttributes: z.literal(true).optional(),
+  }),
+});
+
+// =============================================================================
+// Run lifecycle events
+// =============================================================================
+
+/**
+ * Event created when a workflow run is first created. The World implementation
+ * atomically creates both the event and the run entity with status 'pending'.
+ */
+const RunCreatedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('run_created'),
+  eventData: z.object({
+    deploymentId: z.string(),
+    workflowName: z.string(),
+    input: SerializedDataSchema,
+    executionContext: z.record(z.string(), z.any()).optional(),
+    attributes: z.record(z.string(), z.string()).optional(),
+    allowReservedAttributes: z.literal(true).optional(),
+  }),
+});
+
+/**
+ * Event created when a workflow run starts executing.
+ * Updates the run entity to status 'running'.
+ *
+ * The optional eventData carries run creation data for the resilient start path:
+ * when the run_created event failed (e.g., storage outage during start()), the
+ * runtime passes the run input through the queue so the server can create the run
+ * on the run_started call if it doesn't exist yet.
+ */
+const RunStartedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('run_started'),
+  eventData: z
+    .object({
+      input: SerializedDataSchema.optional(),
+      deploymentId: z.string().optional(),
+      workflowName: z.string().optional(),
+      executionContext: z.record(z.string(), z.any()).optional(),
+      attributes: z.record(z.string(), z.string()).optional(),
+      allowReservedAttributes: z.literal(true).optional(),
+    })
+    .optional(),
+});
+
+/**
+ * Event created when a workflow run completes successfully.
+ * Updates the run entity to status 'completed' with output.
+ */
+const RunCompletedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('run_completed'),
+  eventData: z.object({
+    output: SerializedDataSchema.optional(),
+  }),
+});
+
+/**
+ * Event created when a workflow run fails.
+ * Updates the run entity to status 'failed' with error.
+ */
+const RunFailedEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('run_failed'),
+  eventData: z.object({
+    // The thrown value, serialized via the workflow serialization pipeline.
+    // Can be any JavaScript value (string, number, object, Error, etc.)
+    error: SerializedDataSchema,
+    // The high-level error category (USER_ERROR, RUNTIME_ERROR, etc.) used
+    // for routing and classification. Kept as plaintext metadata so
+    // observability tools can filter/categorize without needing to decrypt
+    // the full error payload.
+    errorCode: z.string().optional(),
+  }),
+});
+
+/**
+ * Event created when a workflow run is cancelled.
+ * Updates the run entity to status 'cancelled'.
+ */
+const RunCancelledEventSchema = BaseEventSchema.extend({
+  eventType: z.literal('run_cancelled'),
+});
+
+// Discriminated union for user-creatable events (requests to world.events.create)
+// Note: hook_conflict is NOT included here - it can only be created by World implementations
+export const CreateEventSchema = z.discriminatedUnion('eventType', [
+  // Run lifecycle events
+  RunCreatedEventSchema,
+  RunStartedEventSchema,
+  RunCompletedEventSchema,
+  RunFailedEventSchema,
+  RunCancelledEventSchema,
+  AttrSetEventSchema,
+  // Step lifecycle events
+  StepCreatedEventSchema,
+  StepCompletedEventSchema,
+  StepFailedEventSchema,
+  StepRetryingEventSchema,
+  StepStartedEventSchema,
+  // Hook lifecycle events
+  HookCreatedEventSchema,
+  HookReceivedEventSchema,
+  HookDisposedEventSchema,
+  // Wait lifecycle events
+  WaitCreatedEventSchema,
+  WaitCompletedEventSchema,
+]);
+
+// Discriminated union for ALL events (includes World-only events like hook_conflict)
+// This is used for reading events from the event log
+const AllEventsSchema = z.discriminatedUnion('eventType', [
+  // Run lifecycle events
+  RunCreatedEventSchema,
+  RunStartedEventSchema,
+  RunCompletedEventSchema,
+  RunFailedEventSchema,
+  RunCancelledEventSchema,
+  AttrSetEventSchema,
+  // Step lifecycle events
+  StepCreatedEventSchema,
+  StepCompletedEventSchema,
+  StepFailedEventSchema,
+  StepRetryingEventSchema,
+  StepStartedEventSchema,
+  // Hook lifecycle events
+  HookCreatedEventSchema,
+  HookReceivedEventSchema,
+  HookDisposedEventSchema,
+  HookConflictEventSchema, // World-only: created when hook token conflicts
+  // Wait lifecycle events
+  WaitCreatedEventSchema,
+  WaitCompletedEventSchema,
+]);
+
+// Server response includes runId, eventId, and createdAt
+// specVersion is optional in database for backwards compatibility
+export const EventSchema = AllEventsSchema.and(
+  z.object({
+    runId: z.string(),
+    eventId: z.string(),
+    createdAt: z.coerce.date(),
+    specVersion: z.number().optional(),
+  })
+);
+
+// Inferred types
+export type Event = z.infer<typeof EventSchema>;
+export type HookReceivedEvent = z.infer<typeof HookReceivedEventSchema>;
+export type HookConflictEvent = z.infer<typeof HookConflictEventSchema>;
+
+/**
+ * Union of all possible event request types.
+ * @internal Use CreateEventRequest or RunCreatedEventRequest instead.
+ */
+export type AnyEventRequest = z.infer<typeof CreateEventSchema>;
+
+/**
+ * Event request for creating a new workflow run.
+ * Can be used with a client-generated runId or null for server-generated.
+ */
+export type RunCreatedEventRequest = z.infer<typeof RunCreatedEventSchema>;
+
+/**
+ * Event request types that require an existing runId.
+ * This is the common case for all events except run_created.
+ */
+export type CreateEventRequest = Exclude<
+  AnyEventRequest,
+  RunCreatedEventRequest
+>;
+
+export interface CreateEventParams {
+  v1Compat?: boolean;
+  resolveData?: ResolveData;
+  /** Request ID (x-vercel-id when on Vercel) for correlating request logs with workflow events. */
+  requestId?: string;
+  /**
+   * Inline-delta optimization (opt-in). When set, the World MAY return,
+   * on the resulting {@link EventResult}, the first page of events written
+   * strictly after this cursor (via `events`/`cursor`/`hasMore`) — the
+   * same page an `events.list({ cursor: sinceCursor, sortOrder: 'asc' })`
+   * call would return immediately after this write. The inline runtime
+   * loop uses this to skip a redundant `events.list` round-trip between
+   * sequential steps: instead of re-reading its own just-written events
+   * (and any events interleaved in-band, such as `hook_received`), it
+   * consumes the authoritative delta the write already had to compute.
+   *
+   * The cursor MUST share `events.list` semantics: the returned `events`
+   * are everything sorted strictly after `sinceCursor`, `cursor` is the
+   * position past the last returned event, and `hasMore` indicates a
+   * further page exists. A World MAY return a single page and set
+   * `hasMore: true` rather than paginating to exhaustion — the runtime
+   * does not consume a truncated delta, it falls back to a full
+   * incremental fetch whenever `hasMore` is true. (For that reason a step
+   * body emitting more in-band events than one page silently bypasses this
+   * fast path, which is correct but forgoes the saved round-trip.)
+   * Returning these fields at all is OPTIONAL — a World that omits them is
+   * fully supported; the runtime falls back to `events.list`. This
+   * preserves the same divergence guarantees as the fetch path because the
+   * delta is computed atomically against the same log the fetch would read.
+   */
+  sinceCursor?: string;
+  /**
+   * Run-started preload opt-out (advisory). On a `run_started` write a World
+   * MAY preload the run's event log onto the {@link EventResult}
+   * (`events`/`cursor`/`hasMore`) so the runtime can skip its initial
+   * `events.list`. The turbo first invocation backgrounds `run_started`
+   * purely as a write barrier and never reads that preload, so it sets this
+   * to tell the World to skip the wasted list+resolve — trimming the
+   * `run_started` round-trip that the chained first `step_started` waits on.
+   * A World that ignores it (or doesn't preload) remains fully correct: the
+   * runtime falls back to `events.list` whenever it actually needs the log.
+   * Only honored for `run_started`; ignored for other event types.
+   *
+   * Named to match the World boundary, the wire frame meta, and the backend
+   * option end-to-end (cf. {@link sinceCursor}) so the single name greps
+   * across the SDK and the backend.
+   */
+  skipPreload?: boolean;
+}
+
+/**
+ * Result of creating an event. Includes the created event and optionally
+ * the entity that was created or updated as a result of the event, with any updates applied to it.
+ *
+ * Note: `event` is optional to support legacy runs where event storage is skipped.
+ */
+export interface EventResult {
+  /** The created event (optional for legacy compatibility) */
+  event?: Event;
+  /** The workflow run entity (for run_* events) */
+  run?: import('./runs.js').WorkflowRun;
+  /** The step entity (for step_* events) */
+  step?: import('./steps.js').Step;
+  /** The hook entity (for hook_created events) */
+  hook?: import('./hooks.js').Hook;
+  /** The wait entity (for wait_created/wait_completed events) */
+  wait?: import('./waits.js').Wait;
+  /**
+   * Events with data resolved. Two producers populate this:
+   *
+   * - On a `run_started` response: all events up to this point, so the
+   *   runtime can skip the initial `events.list` call and reduce TTFB.
+   * - On a step-terminal write (`step_completed` / `step_failed`) when
+   *   the caller passed {@link CreateEventParams.sinceCursor}: the delta
+   *   of events written strictly after that cursor, so the inline loop
+   *   can skip the per-step incremental `events.list` round-trip.
+   */
+  events?: Event[];
+  /** Pagination cursor for `events`, matching events.list semantics. */
+  cursor?: string | null;
+  /** Whether additional event pages are available for `events`. */
+  hasMore?: boolean;
+  /**
+   * Lazy step start: set to `true` only when a `step_started` event with
+   * step-creation data atomically *created* the step on this call (the
+   * caller won the create-claim), as opposed to transitioning a step that
+   * already existed. The owned-inline runtime path uses this as the
+   * exactly-once ownership signal — it runs the step body inline only when
+   * it created the step, so a concurrent handler that lost the create race
+   * (and gets `EntityConflictError`/skipped) never double-executes. Absent
+   * (undefined) on the legacy path and from older servers/worlds, which is
+   * the safe default (treated as "not the lazy creator").
+   */
+  stepCreated?: boolean;
+}
+
+export interface GetEventParams {
+  resolveData?: ResolveData;
+}
+
+export interface ListEventsParams {
+  runId: string;
+  pagination?: PaginationOptions;
+  resolveData?: ResolveData;
+}
+
+export interface ListEventsByCorrelationIdParams {
+  correlationId: string;
+  pagination?: PaginationOptions;
+  resolveData?: ResolveData;
+}

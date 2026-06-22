@@ -1,0 +1,63 @@
+{
+  "name": "@workflow/world-vercel",
+  "version": "5.0.0-beta.19",
+  "description": "Vercel platform World implementation for Workflow SDK",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/workflow.git",
+    "directory": "packages/world-vercel"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./run-id": {
+      "types": "./dist/run-id/index.d.ts",
+      "default": "./dist/run-id/index.js"
+    }
+  },
+  "scripts": {
+    "build": "genversion --es6 src/version.ts && tsc",
+    "dev": "genversion --es6 src/version.ts && tsc --watch",
+    "clean": "tsc --build --clean && rm -rf dist src/version.ts",
+    "test": "vitest run src",
+    "typecheck": "genversion --es6 src/version.ts && tsc --noEmit"
+  },
+  "dependencies": {
+    "@vercel/oidc": "catalog:",
+    "@vercel/queue": "catalog:",
+    "@workflow/errors": "workspace:*",
+    "@workflow/world": "workspace:*",
+    "cbor-x": "1.6.0",
+    "undici": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "1"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/context-async-hooks": "1.30.1",
+    "@opentelemetry/core": "1.30.1",
+    "@opentelemetry/sdk-trace-base": "1.30.1",
+    "@types/node": "catalog:",
+    "@workflow/tsconfig": "workspace:*",
+    "genversion": "3.2.0",
+    "vitest": "catalog:"
+  }
+}

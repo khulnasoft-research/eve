@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "./styles/geistdocs.css";
+
+@source "../**/*.{ts,tsx,mdx}";
+@source "../node_modules/@repo/*/**/*.{ts,tsx}";

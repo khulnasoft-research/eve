@@ -1,0 +1,8 @@
+manifest.js
+.well-known/
+.nitro
+.nuxt
+.output
+.data
+.vercel
+_workflows.ts

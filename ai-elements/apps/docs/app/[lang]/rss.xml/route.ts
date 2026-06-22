@@ -1,0 +1,58 @@
+import type { NextRequest } from "next/server";
+
+import { Feed } from "feed";
+
+import { title } from "@/geistdocs";
+import {
+  componentsSource,
+  docsSource,
+  examplesSource,
+} from "@/lib/geistdocs/source";
+
+const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+const baseUrl = `${protocol}://${process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL}`;
+
+export const revalidate = false;
+
+export const GET = async (
+  _req: NextRequest,
+  { params }: RouteContext<"/[lang]/rss.xml">
+) => {
+  const { lang } = await params;
+  const feed = new Feed({
+    copyright: `All rights reserved ${new Date().getFullYear()}, Vercel`,
+    id: baseUrl,
+    language: lang,
+    link: baseUrl,
+    title,
+  });
+
+  const pages = [
+    ...docsSource.getPages(lang),
+    ...componentsSource.getPages(lang),
+    ...examplesSource.getPages(lang),
+  ];
+
+  for (const page of pages) {
+    feed.addItem({
+      author: [
+        {
+          name: "Vercel",
+        },
+      ],
+      date: new Date(),
+      description: page.data.description,
+      id: page.url,
+      link: `${baseUrl}${page.url}`,
+      title: page.data.title,
+    });
+  }
+
+  const rss = feed.rss2();
+
+  return new Response(rss, {
+    headers: {
+      "Content-Type": "application/rss+xml",
+    },
+  });
+};

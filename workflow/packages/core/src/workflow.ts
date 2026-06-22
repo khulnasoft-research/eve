@@ -1,0 +1,910 @@
+import {
+  ERROR_SLUGS,
+  ReplayDivergenceError,
+  WorkflowNotRegisteredError,
+  WorkflowRuntimeError,
+} from '@workflow/errors';
+import { withResolvers } from '@workflow/utils';
+import { parseWorkflowName } from '@workflow/utils/parse-name';
+import type { Event, WorkflowRun } from '@workflow/world';
+import { SPEC_VERSION_SUPPORTS_COMPRESSION } from '@workflow/world';
+import * as nanoid from 'nanoid';
+import { monotonicFactory } from 'ulid';
+import type { CryptoKey } from './encryption.js';
+import { EventConsumerResult, EventsConsumer } from './events-consumer.js';
+import type { QueueItem } from './global.js';
+import { ENOTSUP, WorkflowSuspension } from './global.js';
+import { runtimeLogger } from './logger.js';
+import type { WorkflowOrchestratorContext } from './private.js';
+import { getPortLazy } from './runtime/get-port-lazy.js';
+import { runIdCreatedAt } from './runtime/run-id-time.js';
+import { handleSuspension } from './runtime/suspension-handler.js';
+import { getWorld } from './runtime/world.js';
+import {
+  dehydrateWorkflowReturnValue,
+  hydrateWorkflowArguments,
+} from './serialization.js';
+import { createUseStep } from './step.js';
+import type { StepHydrationCache } from './step-hydration-cache.js';
+import {
+  BODY_INIT_SYMBOL,
+  STABLE_ULID,
+  WORKFLOW_CREATE_HOOK,
+  WORKFLOW_GET_STREAM_ID,
+  WORKFLOW_SET_ATTRIBUTES,
+  WORKFLOW_SLEEP,
+  WORKFLOW_USE_STEP,
+} from './symbols.js';
+import * as Attribute from './telemetry/semantic-conventions.js';
+import { trace } from './telemetry.js';
+import { getWorkflowRunStreamId } from './util.js';
+import { createContext } from './vm/index.js';
+import { runCachedWorkflowScript } from './vm/script-cache.js';
+import {
+  createAbortSignalStatics,
+  createCreateAbortController,
+} from './workflow/abort-controller.js';
+import { createSetAttributes } from './workflow/attribute-dispatcher.js';
+import type { WorkflowMetadata } from './workflow/get-workflow-metadata.js';
+import { WORKFLOW_CONTEXT_SYMBOL } from './workflow/get-workflow-metadata.js';
+import { createCreateHook } from './workflow/hook.js';
+import { createSleep } from './workflow/sleep.js';
+
+/**
+ * Drain pending queue items at workflow completion (success or failure).
+ *
+ * Treats end-of-run like a final suspension: any operation the workflow code
+ * spawned but didn't `await` — abort hook resumes, hook creations/disposals,
+ * sleep waits, step queueings — gets committed to the event log via the
+ * suspension handler before the run is marked terminal.
+ *
+ * This matches normal JS semantics where `setTimeout(fn, ...)` etc. continue
+ * running after the surrounding function returns. Most importantly, it ensures
+ * `controller.abort()` called as the last statement of a workflow actually
+ * propagates to in-flight steps on other compute instances — without this,
+ * the abort hook is created but never resumed and the cancellation never
+ * reaches the running step.
+ *
+ * NOTE: drain commits native attribute events and the `*_created` events; it
+ * does NOT enqueue step
+ * bodies for execution. The platform's step worker rejects `step_started`
+ * for runs that have already transitioned to terminal (`RunExpiredError`),
+ * so a step queued here would be skipped anyway. Fire-and-forget step calls
+ * with side effects therefore work only when followed by some later `await`
+ * on a runtime primitive that triggers a real suspension (the normal
+ * runtime loop in `runtime.ts` queues the step there). Native attribute writes
+ * do not have this limitation because their event is the durable write.
+ *
+ * Drain failures are swallowed: the workflow's own outcome (the user's return
+ * value or thrown error) is the source of truth; secondary cleanup that fails
+ * shouldn't change the run's terminal state.
+ */
+async function drainPendingQueueItems(
+  runId: string,
+  pendingQueue: Map<string, QueueItem>,
+  vmGlobalThis: typeof globalThis,
+  workflowRun: WorkflowRun,
+  outcome: 'completed' | 'failed'
+): Promise<void> {
+  if (pendingQueue.size === 0) return;
+  // Implicitly dispose any abort hooks (system hooks) that are still alive at
+  // workflow completion so they don't leak rows in the hooks table for the
+  // run's lifetime. Skip hooks that already have an abort in flight — those
+  // will emit hook_received via the abort processing path. User hooks
+  // (isSystem !== true) are intentionally left alone: their lifetime is
+  // managed by the user's code, not the runtime.
+  for (const item of pendingQueue.values()) {
+    if (
+      item.type === 'hook' &&
+      item.isSystem &&
+      !item.disposed &&
+      !item.abortRequested
+    ) {
+      item.disposed = true;
+    }
+  }
+  try {
+    const world = await getWorld();
+    const synthesized = new WorkflowSuspension(pendingQueue, vmGlobalThis);
+    await handleSuspension({
+      suspension: synthesized,
+      world,
+      run: workflowRun,
+    });
+  } catch (err) {
+    runtimeLogger.warn(
+      `Failed to drain pending queue items for ${outcome} workflow run`,
+      {
+        workflowRunId: runId,
+        message: err instanceof Error ? err.message : String(err),
+      }
+    );
+  }
+}
+
+export async function runWorkflow(
+  workflowCode: string,
+  workflowRun: WorkflowRun,
+  events: Event[],
+  encryptionKey: CryptoKey | undefined,
+  /**
+   * Optional per-run cache for hydrated step return values, owned by the inline
+   * replay loop so it survives across the loop's iterations (each of which
+   * creates a fresh context). Memoizes the decrypt + devalue-parse of completed
+   * step results to turn O(N²) replay hydration into O(N). Omitted by callers
+   * that replay only once (then there is nothing to reuse).
+   */
+  stepHydrationCache?: StepHydrationCache
+): Promise<Uint8Array | unknown> {
+  return trace(`workflow.run ${workflowRun.workflowName}`, async (span) => {
+    span?.setAttributes({
+      ...Attribute.WorkflowName(workflowRun.workflowName),
+      ...Attribute.WorkflowRunId(workflowRun.runId),
+      ...Attribute.WorkflowRunStatus(workflowRun.status),
+      ...Attribute.WorkflowEventsCount(events.length),
+    });
+
+    const startedAt = workflowRun.startedAt;
+    if (!startedAt) {
+      throw new WorkflowRuntimeError(
+        `Workflow run "${workflowRun.runId}" has no "startedAt" timestamp (should not happen)`
+      );
+    }
+
+    // The deterministic RNG seed is derived from identifiers that are all
+    // known the instant the queue message arrives — `runId`, `workflowName`,
+    // and `deploymentId` — with no timestamp component. `runId` alone already
+    // makes the seed unique-per-run and replay-stable; `workflowName` and
+    // `deploymentId` are included for extra entropy. Dropping the timestamp
+    // means the seed no longer depends on `startedAt`/`createdAt`, so it (and
+    // the VM context) can be computed before any server round-trip.
+    //
+    // The VM's initial fixed clock is derived from the run's creation time,
+    // recovered from the ULID embedded in `runId` (also available immediately),
+    // falling back to the run snapshot's `createdAt` for non-ULID ids. This
+    // initial `fixedTimestamp` only governs `Date.now()` / `new Date()` in the
+    // window before the first event is consumed; thereafter `updateTimestamp`
+    // advances the VM clock to each consumed event's `createdAt` (see the
+    // EventsConsumer below), starting with `run_created`.
+    const fixedTimestamp =
+      runIdCreatedAt(workflowRun.runId) ?? +workflowRun.createdAt;
+
+    // Get the port before creating VM context to avoid async operations
+    // affecting the deterministic timestamp
+    const isVercel = process.env.VERCEL_URL !== undefined;
+    // Load getPort lazily to prevent Turbopack from tracing get-port's
+    // fs ops (readdir, readFile) into the flow route bundle. The resolved
+    // port is cached per process (see get-port-lazy.ts), so this is cheap
+    // on replays after the first.
+    const port = isVercel ? undefined : await getPortLazy();
+
+    const {
+      context,
+      globalThis: vmGlobalThis,
+      updateTimestamp,
+    } = createContext({
+      seed: `${workflowRun.runId}:${workflowRun.workflowName}:${workflowRun.deploymentId}`,
+      fixedTimestamp,
+    });
+
+    const workflowDiscontinuation = withResolvers<void>();
+
+    const ulid = monotonicFactory(() => vmGlobalThis.Math.random());
+    const generateNanoid = nanoid.customRandom(nanoid.urlAlphabet, 21, (size) =>
+      new Uint8Array(size).map(() => 256 * vmGlobalThis.Math.random())
+    );
+
+    // Create a mutable holder for the promise queue so the EventsConsumer
+    // can access the current queue state via a getter. The queue is mutated
+    // by step/hook/sleep callbacks as events are processed.
+    const promiseQueueHolder = { current: Promise.resolve() };
+
+    const eventsConsumer = new EventsConsumer(events, {
+      onConsumedEvent: (event) => {
+        updateTimestamp(+event.createdAt);
+      },
+      onUnconsumedEvent: (event) => {
+        workflowDiscontinuation.reject(
+          new ReplayDivergenceError(
+            `Replay could not consume event: eventType=${event.eventType}, correlationId=${event.correlationId}, eventId=${event.eventId}.`,
+            { eventId: event.eventId }
+          )
+        );
+      },
+      getPromiseQueue: () => promiseQueueHolder.current,
+    });
+
+    const workflowContext: WorkflowOrchestratorContext = {
+      runId: workflowRun.runId,
+      encryptionKey,
+      globalThis: vmGlobalThis,
+      onWorkflowError: workflowDiscontinuation.reject,
+      eventsConsumer,
+      // Correlation IDs (step_/wait_/hook_) are derived from `generateUlid`, so
+      // the time prefix fed to `ulid()` MUST be replay-stable across every
+      // delivery — otherwise a redelivery regenerates different correlation IDs
+      // and replay throws ReplayDivergenceError. `startedAt` is NOT safe here:
+      // under turbo the first delivery synthesizes `startedAt` from the local
+      // clock, but later (non-turbo) deliveries load the server-canonical
+      // `startedAt`, which differs by >=1ms. Use the same replay-stable value
+      // that already seeds the RNG and the VM clock (`fixedTimestamp`, recovered
+      // from the run ID's ULID and known the instant the message arrives).
+      generateUlid: () => ulid(fixedTimestamp),
+      generateNanoid,
+      invocationsQueue: new Map(),
+      // Use getter/setter so the EventsConsumer's getPromiseQueue() always
+      // sees the latest queue state as it's mutated by step/hook/sleep callbacks.
+      get promiseQueue() {
+        return promiseQueueHolder.current;
+      },
+      set promiseQueue(value: Promise<void>) {
+        promiseQueueHolder.current = value;
+      },
+      pendingDeliveries: 0,
+      pendingDeliveryBarriers: new Map(),
+      stepHydrationCache,
+    };
+
+    // Consume run lifecycle events - these are structural events that don't
+    // need special handling in the workflow, but must be consumed to advance
+    // past them in the event log
+    workflowContext.eventsConsumer.subscribe((event) => {
+      if (!event) {
+        return EventConsumerResult.NotConsumed;
+      }
+
+      // Consume run_created - every run has exactly one
+      if (event.eventType === 'run_created') {
+        return EventConsumerResult.Consumed;
+      }
+
+      // Consume run_started - every run has exactly one
+      if (event.eventType === 'run_started') {
+        return EventConsumerResult.Consumed;
+      }
+
+      // Attribute writes performed from a step have no workflow-body call to
+      // consume them during replay; they are already reflected in the run
+      // snapshot and remain structural until a read API is introduced.
+      if (
+        event.eventType === 'attr_set' &&
+        event.eventData.writer.type === 'step'
+      ) {
+        return EventConsumerResult.Consumed;
+      }
+
+      return EventConsumerResult.NotConsumed;
+    });
+
+    const useStep = createUseStep(workflowContext);
+    const createHook = createCreateHook(workflowContext);
+    const sleep = createSleep(workflowContext);
+    const setAttributes = createSetAttributes(workflowContext);
+
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[WORKFLOW_USE_STEP] = useStep;
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[WORKFLOW_SET_ATTRIBUTES] = setAttributes;
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[WORKFLOW_CREATE_HOOK] = createHook;
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[WORKFLOW_SLEEP] = sleep;
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[WORKFLOW_GET_STREAM_ID] = (namespace?: string) =>
+      getWorkflowRunStreamId(workflowRun.runId, namespace);
+
+    // TODO: there should be a getUrl method on the world interface itself. This
+    // solution only works for vercel + local worlds.
+    const url = isVercel
+      ? `https://${process.env.VERCEL_URL}`
+      : `http://localhost:${port ?? 3000}`;
+
+    // For the workflow VM, we store the context in a symbol on the `globalThis` object
+    const ctx: WorkflowMetadata = {
+      workflowName: workflowRun.workflowName,
+      workflowRunId: workflowRun.runId,
+      workflowStartedAt: new vmGlobalThis.Date(+startedAt),
+      url,
+      features: { encryption: !!encryptionKey },
+    };
+
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[WORKFLOW_CONTEXT_SYMBOL] = ctx;
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[STABLE_ULID] = ulid;
+
+    // NOTE: Will have a config override to use the custom fetch step.
+    //       For now `fetch` must be explicitly imported from `workflow`.
+    vmGlobalThis.fetch = () => {
+      throw new vmGlobalThis.Error(
+        `Global "fetch" is unavailable in workflow functions. Use the "fetch" step function from "workflow" to make HTTP requests.\n\nLearn more: https://workflow-sdk.dev/err/${ERROR_SLUGS.FETCH_IN_WORKFLOW_FUNCTION}`
+      );
+    };
+
+    // Override timeout/interval functions to throw helpful errors
+    // These are not supported in workflow functions because they rely on
+    // asynchronous scheduling which breaks deterministic replay
+    const timeoutErrorMessage =
+      'Timeout functions like "setTimeout" and "setInterval" are not supported in workflow functions. Use the "sleep" function from "workflow" for time-based delays.';
+
+    (vmGlobalThis as any).setTimeout = () => {
+      throw new WorkflowRuntimeError(timeoutErrorMessage, {
+        slug: ERROR_SLUGS.TIMEOUT_FUNCTIONS_IN_WORKFLOW,
+      });
+    };
+    (vmGlobalThis as any).setInterval = () => {
+      throw new WorkflowRuntimeError(timeoutErrorMessage, {
+        slug: ERROR_SLUGS.TIMEOUT_FUNCTIONS_IN_WORKFLOW,
+      });
+    };
+    (vmGlobalThis as any).clearTimeout = () => {
+      throw new WorkflowRuntimeError(timeoutErrorMessage, {
+        slug: ERROR_SLUGS.TIMEOUT_FUNCTIONS_IN_WORKFLOW,
+      });
+    };
+    (vmGlobalThis as any).clearInterval = () => {
+      throw new WorkflowRuntimeError(timeoutErrorMessage, {
+        slug: ERROR_SLUGS.TIMEOUT_FUNCTIONS_IN_WORKFLOW,
+      });
+    };
+    (vmGlobalThis as any).setImmediate = () => {
+      throw new WorkflowRuntimeError(timeoutErrorMessage, {
+        slug: ERROR_SLUGS.TIMEOUT_FUNCTIONS_IN_WORKFLOW,
+      });
+    };
+    (vmGlobalThis as any).clearImmediate = () => {
+      throw new WorkflowRuntimeError(timeoutErrorMessage, {
+        slug: ERROR_SLUGS.TIMEOUT_FUNCTIONS_IN_WORKFLOW,
+      });
+    };
+
+    // `AbortController` and `AbortSignal` in the workflow VM are hook-backed
+    // for deterministic replay. The controller's abort() queues a hook resumption,
+    // and signal.aborted is updated when the hook event is processed during replay.
+    (vmGlobalThis as any).AbortController =
+      createCreateAbortController(workflowContext);
+    const abortSignalStatics = createAbortSignalStatics();
+    (vmGlobalThis as any).AbortSignal = {
+      abort: abortSignalStatics.abort,
+      any: abortSignalStatics.any,
+      timeout: abortSignalStatics.timeout,
+    };
+
+    // `Request` and `Response` are special built-in classes that invoke steps
+    // for the `json()`, `text()` and `arrayBuffer()` instance methods
+    class Request implements globalThis.Request {
+      cache!: globalThis.Request['cache'];
+      credentials!: globalThis.Request['credentials'];
+      destination!: globalThis.Request['destination'];
+      headers!: Headers;
+      integrity!: string;
+      method!: string;
+      mode!: globalThis.Request['mode'];
+      redirect!: globalThis.Request['redirect'];
+      referrer!: string;
+      referrerPolicy!: globalThis.Request['referrerPolicy'];
+      url!: string;
+      keepalive!: boolean;
+      signal!: AbortSignal;
+      duplex!: 'half';
+      body!: ReadableStream<any> | null;
+
+      constructor(input: any, init?: RequestInit) {
+        // Handle URL input
+        if (typeof input === 'string' || input instanceof vmGlobalThis.URL) {
+          const urlString = String(input);
+          // Validate URL format
+          try {
+            new vmGlobalThis.URL(urlString);
+            this.url = urlString;
+          } catch (cause) {
+            throw new TypeError(`Failed to parse URL from ${urlString}`, {
+              cause,
+            });
+          }
+        } else {
+          // Input is a Request object - clone its properties
+          this.url = input.url;
+          if (!init) {
+            this.method = input.method;
+            this.headers = new vmGlobalThis.Headers(input.headers);
+            this.body = input.body;
+            this.mode = input.mode;
+            this.credentials = input.credentials;
+            this.cache = input.cache;
+            this.redirect = input.redirect;
+            this.referrer = input.referrer;
+            this.referrerPolicy = input.referrerPolicy;
+            this.integrity = input.integrity;
+            this.keepalive = input.keepalive;
+            this.signal = input.signal;
+            this.duplex = input.duplex;
+            this.destination = input.destination;
+            return;
+          }
+          // If init is provided, merge: use source properties, then override with init
+          // Copy all properties from the source Request first
+          this.method = input.method;
+          this.headers = new vmGlobalThis.Headers(input.headers);
+          this.body = input.body;
+          this.mode = input.mode;
+          this.credentials = input.credentials;
+          this.cache = input.cache;
+          this.redirect = input.redirect;
+          this.referrer = input.referrer;
+          this.referrerPolicy = input.referrerPolicy;
+          this.integrity = input.integrity;
+          this.keepalive = input.keepalive;
+          this.signal = input.signal;
+          this.duplex = input.duplex;
+          this.destination = input.destination;
+        }
+
+        // Override with init options if provided
+        // Set method
+        if (init?.method) {
+          this.method = init.method.toUpperCase();
+        } else if (typeof this.method !== 'string') {
+          // Fallback to default for string input case
+          this.method = 'GET';
+        }
+
+        // Set headers
+        if (init?.headers) {
+          this.headers = new vmGlobalThis.Headers(init.headers);
+        } else if (
+          typeof input === 'string' ||
+          input instanceof vmGlobalThis.URL
+        ) {
+          // For string/URL input, create empty headers
+          this.headers = new vmGlobalThis.Headers();
+        }
+
+        // Set other properties with init values or defaults
+        if (init?.mode !== undefined) {
+          this.mode = init.mode;
+        } else if (typeof this.mode !== 'string') {
+          this.mode = 'cors';
+        }
+
+        if (init?.credentials !== undefined) {
+          this.credentials = init.credentials;
+        } else if (typeof this.credentials !== 'string') {
+          this.credentials = 'same-origin';
+        }
+
+        // `any` cast here because @types/node v22 does not yet have `cache`
+        if ((init as any)?.cache !== undefined) {
+          this.cache = (init as any).cache;
+        } else if (typeof this.cache !== 'string') {
+          this.cache = 'default';
+        }
+
+        if (init?.redirect !== undefined) {
+          this.redirect = init.redirect;
+        } else if (typeof this.redirect !== 'string') {
+          this.redirect = 'follow';
+        }
+
+        if (init?.referrer !== undefined) {
+          this.referrer = init.referrer;
+        } else if (typeof this.referrer !== 'string') {
+          this.referrer = 'about:client';
+        }
+
+        if (init?.referrerPolicy !== undefined) {
+          this.referrerPolicy = init.referrerPolicy;
+        } else if (typeof this.referrerPolicy !== 'string') {
+          this.referrerPolicy = '';
+        }
+
+        if (init?.integrity !== undefined) {
+          this.integrity = init.integrity;
+        } else if (typeof this.integrity !== 'string') {
+          this.integrity = '';
+        }
+
+        if (init?.keepalive !== undefined) {
+          this.keepalive = init.keepalive;
+        } else if (typeof this.keepalive !== 'boolean') {
+          this.keepalive = false;
+        }
+
+        if (init?.signal !== undefined) {
+          // @ts-expect-error - AbortSignal stub
+          this.signal = init.signal;
+        } else if (!this.signal) {
+          // @ts-expect-error - AbortSignal stub
+          this.signal = { aborted: false };
+        }
+
+        if (!this.duplex) {
+          this.duplex = 'half';
+        }
+
+        if (!this.destination) {
+          this.destination = 'document';
+        }
+
+        const body = init?.body;
+
+        // Validate that GET/HEAD methods don't have a body
+        if (
+          body !== null &&
+          body !== undefined &&
+          (this.method === 'GET' || this.method === 'HEAD')
+        ) {
+          throw new TypeError(`Request with GET/HEAD method cannot have body.`);
+        }
+
+        // Store the original BodyInit for serialization
+        if (body !== null && body !== undefined) {
+          // Create a "fake" ReadableStream that stores the original body
+          // This avoids doing async work during workflow replay
+          this.body = Object.create(vmGlobalThis.ReadableStream.prototype, {
+            [BODY_INIT_SYMBOL]: {
+              value: body,
+              writable: false,
+            },
+          });
+        } else {
+          this.body = null;
+        }
+      }
+
+      clone(): Request {
+        ENOTSUP();
+      }
+
+      get bodyUsed() {
+        return false;
+      }
+
+      // TODO: implement these
+      blob!: () => Promise<Blob>;
+      formData!: () => Promise<FormData>;
+
+      arrayBuffer!: () => Promise<ArrayBuffer>;
+      json!: () => Promise<any>;
+      text!: () => Promise<string>;
+
+      async bytes() {
+        return new Uint8Array(await this.arrayBuffer());
+      }
+    }
+    vmGlobalThis.Request = Request;
+
+    Object.defineProperties(Request.prototype, {
+      arrayBuffer: {
+        value: useStep<[], ArrayBuffer>('__builtin_response_array_buffer'),
+        writable: true,
+        configurable: true,
+      },
+      json: {
+        value: useStep<[], any>('__builtin_response_json'),
+        writable: true,
+        configurable: true,
+      },
+      text: {
+        value: useStep<[], string>('__builtin_response_text'),
+        writable: true,
+        configurable: true,
+      },
+    });
+
+    class Response implements globalThis.Response {
+      type!: globalThis.Response['type'];
+      url!: string;
+      status!: number;
+      statusText!: string;
+      body!: ReadableStream<Uint8Array> | null;
+      headers!: Headers;
+      redirected!: boolean;
+
+      constructor(body?: any, init?: ResponseInit) {
+        this.status = init?.status ?? 200;
+        this.statusText = init?.statusText ?? '';
+        this.headers = new vmGlobalThis.Headers(init?.headers);
+        this.type = 'default';
+        this.url = '';
+        this.redirected = false;
+
+        // Validate that null-body status codes don't have a body
+        // Per HTTP spec: 204 (No Content), 205 (Reset Content), and 304 (Not Modified)
+        if (
+          body !== null &&
+          body !== undefined &&
+          (this.status === 204 || this.status === 205 || this.status === 304)
+        ) {
+          throw new TypeError(
+            `Response constructor: Invalid response status code ${this.status}`
+          );
+        }
+
+        // Store the original BodyInit for serialization
+        if (body !== null && body !== undefined) {
+          // Create a "fake" ReadableStream that stores the original body
+          // This avoids doing async work during workflow replay
+          this.body = Object.create(vmGlobalThis.ReadableStream.prototype, {
+            [BODY_INIT_SYMBOL]: {
+              value: body,
+              writable: false,
+            },
+          });
+        } else {
+          this.body = null;
+        }
+      }
+
+      // TODO: implement these
+      clone!: () => Response;
+      blob!: () => Promise<globalThis.Blob>;
+      formData!: () => Promise<globalThis.FormData>;
+
+      get ok() {
+        return this.status >= 200 && this.status < 300;
+      }
+
+      get bodyUsed() {
+        return false;
+      }
+
+      arrayBuffer!: () => Promise<ArrayBuffer>;
+      json!: () => Promise<any>;
+      text!: () => Promise<string>;
+
+      async bytes() {
+        return new Uint8Array(await this.arrayBuffer());
+      }
+
+      static json(data: any, init?: ResponseInit): Response {
+        const body = JSON.stringify(data);
+        const headers = new vmGlobalThis.Headers(init?.headers);
+        if (!headers.has('content-type')) {
+          headers.set('content-type', 'application/json');
+        }
+        return new Response(body, { ...init, headers });
+      }
+
+      static error(): Response {
+        ENOTSUP();
+      }
+
+      static redirect(url: string | URL, status: number = 302): Response {
+        // Validate status code - only specific redirect codes are allowed
+        if (![301, 302, 303, 307, 308].includes(status)) {
+          throw new RangeError(
+            `Invalid redirect status code: ${status}. Must be one of: 301, 302, 303, 307, 308`
+          );
+        }
+
+        // Create response with Location header
+        const headers = new vmGlobalThis.Headers();
+        headers.set('Location', String(url));
+
+        const response = Object.create(Response.prototype);
+        response.status = status;
+        response.statusText = '';
+        response.headers = headers;
+        response.body = null;
+        response.type = 'default';
+        response.url = '';
+        response.redirected = false;
+
+        return response;
+      }
+    }
+    vmGlobalThis.Response = Response;
+
+    Object.defineProperties(Response.prototype, {
+      arrayBuffer: {
+        value: useStep<[], ArrayBuffer>('__builtin_response_array_buffer'),
+        writable: true,
+        configurable: true,
+      },
+      json: {
+        value: useStep<[], any>('__builtin_response_json'),
+        writable: true,
+        configurable: true,
+      },
+      text: {
+        value: useStep<[], string>('__builtin_response_text'),
+        writable: true,
+        configurable: true,
+      },
+    });
+
+    class ReadableStream<T> implements globalThis.ReadableStream<T> {
+      constructor() {
+        ENOTSUP();
+      }
+
+      get locked() {
+        return false;
+      }
+
+      cancel(): any {
+        ENOTSUP();
+      }
+
+      getReader(): any {
+        ENOTSUP();
+      }
+
+      pipeThrough(): any {
+        ENOTSUP();
+      }
+
+      pipeTo(): any {
+        ENOTSUP();
+      }
+
+      tee(): any {
+        ENOTSUP();
+      }
+
+      values(): any {
+        ENOTSUP();
+      }
+
+      static from(): any {
+        ENOTSUP();
+      }
+
+      [Symbol.asyncIterator](): any {
+        ENOTSUP();
+      }
+    }
+    vmGlobalThis.ReadableStream = ReadableStream;
+
+    class WritableStream<T> implements globalThis.WritableStream<T> {
+      constructor() {
+        ENOTSUP();
+      }
+
+      get locked() {
+        return false;
+      }
+
+      abort(): any {
+        ENOTSUP();
+      }
+
+      close(): any {
+        ENOTSUP();
+      }
+
+      getWriter(): any {
+        ENOTSUP();
+      }
+    }
+    vmGlobalThis.WritableStream = WritableStream;
+
+    class TransformStream<I, O> implements globalThis.TransformStream<I, O> {
+      readable: globalThis.ReadableStream<O>;
+      writable: globalThis.WritableStream<I>;
+
+      constructor() {
+        ENOTSUP();
+      }
+    }
+    vmGlobalThis.TransformStream = TransformStream;
+
+    // Eventually we'll probably want to provide our own `console` object,
+    // but for now we'll just expose the global one.
+    vmGlobalThis.console = globalThis.console;
+
+    // HACK: propagate symbol needed for AI gateway usage
+    const SYMBOL_FOR_REQ_CONTEXT = Symbol.for('@vercel/request-context');
+    // @ts-expect-error - `@types/node` says symbol is not valid, but it does work
+    vmGlobalThis[SYMBOL_FOR_REQ_CONTEXT] = (globalThis as any)[
+      SYMBOL_FOR_REQ_CONTEXT
+    ];
+
+    // Get a reference to the user-defined workflow function.
+    // The filename parameter ensures stack traces show a meaningful name
+    // (e.g., "example/workflows/99_e2e.ts") instead of "evalmachine.<anonymous>".
+    const parsedName = parseWorkflowName(workflowRun.workflowName);
+    const filename = parsedName?.moduleSpecifier || workflowRun.workflowName;
+
+    // Evaluate the workflow bundle against the fresh context using a
+    // process-wide cache of the compiled `vm.Script`. The bundle is the same
+    // string for every replay and every invocation in this process, and
+    // compilation is a pure function of `(code, filename)`, so reusing the
+    // compiled Script across replays is determinism-safe: it produces the same
+    // workflow function and the same `filename` source attribution as
+    // re-parsing the bundle every time, but skips the (expensive) re-parse.
+    // Evaluating the bundle registers every workflow on
+    // `globalThis.__private_workflows`; the trailing lookup expression then
+    // retrieves the requested workflow function. The lookup is evaluated as a
+    // separate cached Script under the same `filename`, so error stack frames
+    // still attribute to the workflow's source file (`remapErrorStack` keys on
+    // `filename`). The one behavioural difference from the previous
+    // single-combined-string approach is the *line number* of an error thrown
+    // by the lookup expression itself: it now reports line 1 of the lookup
+    // Script rather than the line just past the end of the bundle. That path
+    // is rare (it requires the lookup `?.get(...)` expression to throw) and
+    // does not affect the workflow function or replay determinism.
+    runCachedWorkflowScript(workflowCode, filename, context);
+    const workflowFn = runCachedWorkflowScript(
+      `globalThis.__private_workflows?.get(${JSON.stringify(workflowRun.workflowName)})`,
+      filename,
+      context
+    );
+
+    if (typeof workflowFn !== 'function') {
+      throw new WorkflowNotRegisteredError(workflowRun.workflowName);
+    }
+
+    // Chain workflow argument hydration onto the promiseQueue so that the
+    // unconsumed event check (which waits for the queue to drain) doesn't
+    // fire during the async gap between run_started consumption and the
+    // workflow function subscribing its first step callbacks.
+    let args: unknown[] = [];
+    workflowContext.promiseQueue = workflowContext.promiseQueue.then(
+      async () => {
+        args = await hydrateWorkflowArguments(
+          workflowRun.input,
+          workflowRun.runId,
+          encryptionKey,
+          vmGlobalThis
+        );
+      }
+    );
+    await workflowContext.promiseQueue;
+
+    span?.setAttributes({
+      ...Attribute.WorkflowArgumentsCount(args.length),
+    });
+
+    // Invoke user workflow
+    try {
+      const result = await Promise.race([
+        workflowFn(...args),
+        workflowDiscontinuation.promise,
+      ]);
+
+      const dehydrated = await dehydrateWorkflowReturnValue(
+        result,
+        workflowRun.runId,
+        encryptionKey,
+        vmGlobalThis,
+        false,
+        // Gate payload compression on the run's specVersion: only runs
+        // marked as possibly containing compressed payloads (spec >= 5)
+        // get gzip data.
+        (workflowRun.specVersion ?? 0) >= SPEC_VERSION_SUPPORTS_COMPRESSION
+      );
+
+      span?.setAttributes({
+        ...Attribute.WorkflowResultType(typeof result),
+      });
+
+      await drainPendingQueueItems(
+        workflowRun.runId,
+        workflowContext.invocationsQueue,
+        vmGlobalThis,
+        workflowRun,
+        'completed'
+      );
+
+      return dehydrated;
+    } catch (err) {
+      // Control-flow signals are handled by the runtime and do not mean the
+      // workflow has terminally failed.
+      if (WorkflowSuspension.is(err) || ReplayDivergenceError.is(err)) {
+        throw err;
+      }
+
+      await drainPendingQueueItems(
+        workflowRun.runId,
+        workflowContext.invocationsQueue,
+        vmGlobalThis,
+        workflowRun,
+        'failed'
+      );
+
+      throw err;
+    }
+  });
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@workflow/example-app",
+  "private": true,
+  "type": "module",
+  "version": "0.0.2-alpha.18",
+  "license": "Apache-2.0",
+  "scripts": {
+    "workflow": "workflow",
+    "wf": "wf",
+    "build": "workflow build --target vercel-build-output-api --workflow-manifest manifest.js"
+  },
+  "devDependencies": {
+    "@workflow/world-postgres": "workspace:*",
+    "@types/lodash.chunk": "^4.2.9",
+    "@types/node": "catalog:",
+    "@workflow/cli": "workspace:*",
+    "esbuild": "catalog:"
+  },
+  "dependencies": {
+    "@vercel/functions": "catalog:",
+    "@vercel/otel": "^1.13.0",
+    "workflow": "workspace:*",
+    "@workflow/ai": "workspace:*",
+    "ai": "catalog:",
+    "lodash.chunk": "^4.2.0",
+    "mixpart": "^0.0.4",
+    "openai": "^6",
+    "zod": "catalog:"
+  }
+}

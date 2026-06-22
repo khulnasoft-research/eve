@@ -1,0 +1,547 @@
+import { readFile } from 'node:fs/promises';
+import { relative } from 'node:path';
+import { promisify } from 'node:util';
+import { WorkflowBuildError } from '@workflow/errors';
+import enhancedResolveOrig from 'enhanced-resolve';
+import type { Plugin } from 'esbuild';
+import {
+  applySwcTransform,
+  type WorkflowManifest,
+} from './apply-swc-transform.js';
+import {
+  jsTsRegex,
+  parentHasChild,
+} from './discover-entries-esbuild-plugin.js';
+import { resolveModuleSpecifier } from './module-specifier.js';
+import { resolveWorkflowAliasRelativePath } from './workflow-alias.js';
+
+export interface SwcPluginOptions {
+  mode: 'step' | 'workflow';
+  entriesToBundle?: string[];
+  outdir?: string;
+  projectRoot?: string;
+  moduleSpecifierRoot?: string;
+  workflowManifest?: WorkflowManifest;
+  /**
+   * Rewrite TypeScript extensions (.ts, .tsx, .mts, .cts) to their JS
+   * equivalents (.js, .mjs, .cjs) in externalized import paths.
+   *
+   * Enable this when the output bundle is consumed directly by Node's native
+   * ESM loader (e.g. vitest), which cannot resolve .ts extensions.
+   *
+   * Leave disabled (default) when a downstream bundler (webpack, Vite, etc.)
+   * handles resolution — those tools resolve .ts natively and rewriting
+   * breaks them because the .js file doesn't exist on disk.
+   */
+  rewriteTsExtensions?: boolean;
+  /**
+   * Bundle project-local files that are transitively imported by step entries.
+   *
+   * Keep this disabled when a downstream bundler consumes the generated step
+   * bundle because that bundler can resolve the externalized local imports.
+   * Enable it for direct runtime loading, where Node imports the generated step
+   * bundle from disk without a later bundling pass.
+   */
+  bundleTransitiveLocalStepDependencies?: boolean;
+  /**
+   * Absolute file paths of discovered workflow/step/serde entries whose
+   * imports must be treated as side-effectful.
+   *
+   * The SWC compiler transform injects registration calls (workflow IDs,
+   * step IDs, class serialization, etc.) into these files. Without this
+   * override, esbuild honours `"sideEffects": false` from the package's
+   * `package.json` and silently drops bare imports of these modules.
+   */
+  sideEffectEntries?: string[];
+}
+
+const NODE_RESOLVE_OPTIONS = {
+  dependencyType: 'commonjs',
+  modules: ['node_modules'],
+  exportsFields: ['exports'],
+  importsFields: ['imports'],
+  conditionNames: ['node', 'require'],
+  descriptionFiles: ['package.json'],
+  extensions: [
+    '.ts',
+    '.tsx',
+    '.mts',
+    '.cts',
+    '.cjs',
+    '.mjs',
+    '.js',
+    '.jsx',
+    '.json',
+    '.node',
+  ],
+  enforceExtensions: false,
+  symlinks: true,
+  mainFields: ['main'],
+  mainFiles: ['index'],
+  roots: [],
+  fullySpecified: false,
+  preferRelative: false,
+  preferAbsolute: false,
+  restrictions: [],
+};
+
+const NODE_ESM_RESOLVE_OPTIONS = {
+  ...NODE_RESOLVE_OPTIONS,
+  dependencyType: 'esm',
+  conditionNames: ['node', 'import'],
+};
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+type IdLocation = {
+  filePath: string;
+  name: string;
+};
+
+function formatIdLocation(location: IdLocation): string {
+  return `${location.filePath}#${location.name}`;
+}
+
+function assertUniqueManifestIds(
+  entriesByFile: WorkflowManifest['steps'] | WorkflowManifest['workflows'],
+  ids: Map<string, IdLocation>,
+  getId: (data: { stepId: string } | { workflowId: string }) => string,
+  label: 'step' | 'workflow'
+): void {
+  const entriesByFileList = Object.entries(entriesByFile || {}) as Array<
+    [string, Record<string, { stepId: string } | { workflowId: string }>]
+  >;
+  for (const [filePath, entries] of entriesByFileList) {
+    for (const [name, data] of Object.entries(entries)) {
+      const id = getId(data);
+      const existing = ids.get(id);
+      const current = { filePath, name };
+      if (
+        existing &&
+        (existing.filePath !== current.filePath ||
+          existing.name !== current.name)
+      ) {
+        const idName = label === 'step' ? 'workflow step ID' : 'workflow ID';
+        const functionName = `${label} function`;
+        const capitalizedLabel = label === 'step' ? 'Step' : 'Workflow';
+        throw new WorkflowBuildError(
+          `Duplicate ${idName} "${id}" generated for ${formatIdLocation(existing)} and ${formatIdLocation(current)}.`,
+          {
+            hint:
+              `${capitalizedLabel} IDs must be unique across a build. ` +
+              `If you own one of the colliding files, rename the ${functionName} or export ` +
+              `the package file through a unique package subpath. If the collision is in a ` +
+              `transitive dependency you don't control, file an issue with the upstream ` +
+              `package or pin to a non-colliding version.`,
+          }
+        );
+      }
+      ids.set(id, current);
+    }
+  }
+}
+
+function mergeWorkflowManifest(
+  target: WorkflowManifest,
+  incoming: WorkflowManifest,
+  stepIds: Map<string, IdLocation>,
+  workflowIds: Map<string, IdLocation>
+): void {
+  assertUniqueManifestIds(
+    incoming.steps,
+    stepIds,
+    (data) => (data as { stepId: string }).stepId,
+    'step'
+  );
+  assertUniqueManifestIds(
+    incoming.workflows,
+    workflowIds,
+    (data) => (data as { workflowId: string }).workflowId,
+    'workflow'
+  );
+
+  target.workflows = Object.assign(target.workflows || {}, incoming.workflows);
+  target.steps = Object.assign(target.steps || {}, incoming.steps);
+  target.classes = Object.assign(target.classes || {}, incoming.classes);
+}
+
+export function createSwcPlugin(options: SwcPluginOptions): Plugin {
+  return {
+    name: 'swc-workflow-plugin',
+    setup(build) {
+      let stepIdsForCurrentBuild = new Map<string, IdLocation>();
+      let workflowIdsForCurrentBuild = new Map<string, IdLocation>();
+
+      build.onStart(() => {
+        stepIdsForCurrentBuild = new Map();
+        workflowIdsForCurrentBuild = new Map();
+      });
+
+      // everything is external unless explicitly configured
+      // to be bundled
+      const cjsResolver = promisify(
+        enhancedResolveOrig.create(NODE_RESOLVE_OPTIONS)
+      );
+      const esmResolver = promisify(
+        enhancedResolveOrig.create(NODE_ESM_RESOLVE_OPTIONS)
+      );
+
+      const enhancedResolve = async (context: string, path: string) => {
+        try {
+          return await esmResolver(context, path);
+        } catch (_) {
+          return cjsResolver(context, path);
+        }
+      };
+
+      // Pre-compute the normalized side-effect entries set for O(1) lookups.
+      const normalizedSideEffectEntries = new Set(
+        options.sideEffectEntries?.map((e) => e.replace(/\\/g, '/'))
+      );
+
+      build.onResolve({ filter: /.*/ }, async (args) => {
+        if (args.pluginData?.skipSwcPlugin) return null;
+
+        if (
+          !options.entriesToBundle &&
+          normalizedSideEffectEntries.size === 0
+        ) {
+          return null;
+        }
+
+        // When only sideEffectEntries is set (no entriesToBundle), we only
+        // need to override sideEffects for top-level bare imports — typically
+        // from the virtual entry. Skip resolution for transitive imports
+        // (dynamic imports, requires, etc.) to avoid unnecessary overhead.
+        if (!options.entriesToBundle && args.kind !== 'import-statement') {
+          return null;
+        }
+
+        try {
+          const specifier = args.path;
+          const specifierIsPath =
+            specifier.startsWith('.') || specifier.startsWith('/');
+
+          let resolvedPath: string | false | undefined;
+          // Path-style specifiers (./foo, ../foo, /abs/path) externalize as
+          // relative paths from `outdir`. Bare specifiers (npm packages)
+          // externalize as-is so Node can resolve them at runtime.
+          const shouldMakeRelative = specifierIsPath;
+
+          if (specifierIsPath) {
+            resolvedPath = await enhancedResolve(args.resolveDir, specifier);
+          } else {
+            // Resolve from project root so nested deps aren't externalized
+            resolvedPath = await enhancedResolve(
+              build.initialOptions.absWorkingDir || process.cwd(),
+              specifier
+            ).catch(() => undefined); // swallow so esbuild fallback below can try
+
+            // Fall back to esbuild for aliases/tsconfig paths.
+            //
+            // If the specifier resolves to a project-local file via an
+            // alias/path mapping (e.g. tsconfig `paths`, esbuild `alias`,
+            // self-referencing package names like `@my-pkg/lib/foo`), we
+            // bundle it inline rather than externalizing.
+            //
+            // Externalizing such files is unsafe: we'd emit a relative
+            // import to the original source on disk, but that source can
+            // contain further alias imports. At runtime, Node's ESM loader
+            // doesn't know about tsconfig paths or build-time aliases, so
+            // those transitive imports throw `ERR_MODULE_NOT_FOUND` /
+            // `Package subpath ... is not defined by "exports"`.
+            //
+            // Bundling inline ensures alias-based imports are resolved at
+            // build time (where the alias map is known) and the runtime
+            // never sees an unresolvable specifier.
+            if (!resolvedPath) {
+              const esbuildResult = await build.resolve(specifier, {
+                resolveDir: args.resolveDir,
+                kind: args.kind,
+                pluginData: { skipSwcPlugin: true },
+              });
+              const didResolve =
+                !!esbuildResult.path && !esbuildResult.errors.length;
+              const isProjectLocalFile =
+                didResolve &&
+                !esbuildResult.external &&
+                !esbuildResult.path
+                  .replace(/\\/g, '/')
+                  .includes('/node_modules/');
+              if (isProjectLocalFile) {
+                // Let esbuild bundle this aliased project-local file inline
+                // (return null to defer to esbuild's normal pipeline). The
+                // SWC `onLoad` handler will still process it.
+                return null;
+              } else if (
+                options.entriesToBundle &&
+                esbuildResult.path?.endsWith('.node')
+              ) {
+                return {
+                  external: true,
+                  path: specifier,
+                };
+              }
+            }
+          }
+
+          if (!resolvedPath) return null;
+
+          // Normalize to forward slashes for cross-platform comparison
+          const normalizedResolvedPath = normalizePath(resolvedPath);
+          const workingDir =
+            build.initialOptions.absWorkingDir || process.cwd();
+          const projectRoot = options.projectRoot || workingDir;
+          const moduleSpecifierRoot =
+            options.moduleSpecifierRoot || projectRoot;
+
+          if (
+            options.entriesToBundle &&
+            normalizedResolvedPath.endsWith('.node')
+          ) {
+            return {
+              external: true,
+              path: specifier,
+            };
+          }
+
+          // Check if this module is a discovered entry whose SWC-transformed
+          // code contains side effects (workflow/step/class registration).
+          // Override the package.json "sideEffects": false so esbuild does not
+          // drop bare imports of these modules.
+          const hasSideEffects = normalizedSideEffectEntries.has(
+            normalizedResolvedPath
+          );
+
+          if (options.entriesToBundle) {
+            let shouldBundle = false;
+            for (const entryToBundle of options.entriesToBundle) {
+              const normalizedEntry = entryToBundle.replace(/\\/g, '/');
+
+              if (normalizedResolvedPath === normalizedEntry) {
+                shouldBundle = true;
+                break;
+              }
+
+              // if the current entry imports a child that needs
+              // to be bundled then it needs to also be bundled so
+              // that the child can have our transform applied
+              if (parentHasChild(normalizedResolvedPath, normalizedEntry)) {
+                shouldBundle = true;
+                break;
+              }
+
+              // Bundle project-local source files that are imported by a
+              // step/serde entry so direct runtime loaders do not see raw TS
+              // extensionless imports. Keep package dependencies external
+              // unless they are themselves in entriesToBundle or are parents
+              // of a discovered workflow/step/serde file via the check above.
+              if (
+                options.bundleTransitiveLocalStepDependencies &&
+                isProjectLocalFile(
+                  normalizedResolvedPath,
+                  moduleSpecifierRoot
+                ) &&
+                parentHasChild(normalizedEntry, normalizedResolvedPath)
+              ) {
+                shouldBundle = true;
+                break;
+              }
+            }
+
+            if (shouldBundle) {
+              // Let esbuild bundle this entry, but override sideEffects if needed.
+              // We must return the resolved `path` alongside `sideEffects` because
+              // returning only `{ sideEffects: true }` without a path causes esbuild
+              // to fall through to its own resolver, which re-reads the package.json
+              // and applies `"sideEffects": false` from there.
+              return hasSideEffects
+                ? { path: resolvedPath, sideEffects: true }
+                : null;
+            }
+
+            let externalPath: string;
+            if (shouldMakeRelative) {
+              // When the resolved file lives inside node_modules, let
+              // esbuild bundle it rather than externalizing with a deeply
+              // nested relative path. Downstream bundlers (Rollup/Vite)
+              // can't rewrite opaque `__require()` calls in CJS shims, so
+              // relative paths computed for `outdir` break once the output
+              // is rebundled to a different directory.
+              if (normalizedResolvedPath.includes('/node_modules/')) {
+                return null; // let esbuild bundle it
+              }
+
+              externalPath = relative(
+                options.outdir || process.cwd(),
+                resolvedPath
+              ).replace(/\\/g, '/');
+
+              if (options.rewriteTsExtensions) {
+                // Rewrite TypeScript extensions to their JS equivalents so the
+                // externalized import is loadable by Node's native ESM loader.
+                externalPath = externalPath
+                  .replace(/\.tsx?$/, '.js')
+                  .replace(/\.mts$/, '.mjs')
+                  .replace(/\.cts$/, '.cjs');
+              }
+            } else {
+              externalPath = specifier;
+            }
+
+            return {
+              external: true,
+              path: externalPath,
+              sideEffects: hasSideEffects || undefined,
+            };
+          }
+
+          // No entriesToBundle — only override sideEffects when needed.
+          // We must return the resolved `path` alongside `sideEffects` because
+          // returning only `{ sideEffects: true }` without a path causes esbuild
+          // to fall through to its own resolver, which re-reads the package.json
+          // and applies `"sideEffects": false` from there.
+          return hasSideEffects
+            ? { path: resolvedPath, sideEffects: true }
+            : null;
+        } catch (_) {}
+        return null;
+      });
+
+      // Handle TypeScript and JavaScript files
+      build.onLoad({ filter: jsTsRegex }, async (args) => {
+        // Determine if this is a TypeScript file
+        try {
+          // Determine the loader based on the output
+          let loader: 'js' | 'jsx' | 'tsx' = 'js';
+          if (args.path.endsWith('.jsx')) {
+            loader = 'jsx';
+          } else if (args.path.endsWith('.tsx')) {
+            loader = 'tsx';
+          }
+          const source = await readFile(args.path, 'utf8');
+          const normalizedSource = source
+            .replace(/require\(\s*(['"])server-only\1\s*\)/g, 'void 0')
+            .replace(/require\(\s*(['"])client-only\1\s*\)/g, 'void 0');
+
+          // Calculate relative path for SWC plugin
+          // The filename parameter is used to generate workflowId/stepId, so it must be relative
+          const workingDir =
+            build.initialOptions.absWorkingDir || process.cwd();
+          const projectRoot = options.projectRoot || workingDir;
+          const moduleSpecifierRoot =
+            options.moduleSpecifierRoot || projectRoot;
+          // Normalize paths: convert backslashes to forward slashes and remove trailing slashes
+          const normalizedWorkingDir = workingDir
+            .replace(/\\/g, '/')
+            .replace(/\/$/, '');
+          const normalizedPath = args.path.replace(/\\/g, '/');
+
+          // Windows fix: Always do case-insensitive path comparison as the PRIMARY logic
+          // to work around node:path.relative() not recognizing paths with different drive
+          // letter casing (e.g., D: vs d:) as being in the same tree
+          const lowerWd = normalizedWorkingDir.toLowerCase();
+          const lowerPath = normalizedPath.toLowerCase();
+
+          let relativeFilepath: string;
+          if (lowerPath.startsWith(lowerWd + '/')) {
+            // File is under working directory - manually calculate relative path
+            // This ensures we get a relative path even with drive letter casing issues
+            relativeFilepath = normalizedPath.substring(
+              normalizedWorkingDir.length + 1
+            );
+          } else if (lowerPath === lowerWd) {
+            // File IS the working directory
+            relativeFilepath = '.';
+          } else {
+            // File is outside working directory - use relative() and strip ../ prefixes if needed
+            relativeFilepath = relative(
+              normalizedWorkingDir,
+              normalizedPath
+            ).replace(/\\/g, '/');
+
+            // Handle files discovered outside the working directory
+            // These come back as ../path/to/file, but we want just path/to/file
+            if (relativeFilepath.startsWith('../')) {
+              const aliasedRelativePath =
+                await resolveWorkflowAliasRelativePath(args.path, workingDir);
+              if (aliasedRelativePath) {
+                relativeFilepath = aliasedRelativePath;
+              } else {
+                relativeFilepath = relativeFilepath
+                  .split('/')
+                  .filter((part) => part !== '..')
+                  .join('/');
+              }
+            }
+          }
+
+          // Final safety check - ensure we never pass an absolute path to SWC
+          if (
+            relativeFilepath.includes(':') ||
+            relativeFilepath.startsWith('/')
+          ) {
+            // This should never happen, but if it does, use just the filename as last resort
+            console.error(
+              `[ERROR] relativeFilepath is still absolute: ${relativeFilepath}`
+            );
+            relativeFilepath = normalizedPath.split('/').pop() || 'unknown.ts';
+          }
+
+          const { code: transformedCode, workflowManifest } =
+            await applySwcTransform(
+              relativeFilepath,
+              normalizedSource,
+              options.mode,
+              args.path, // Pass absolute path for module specifier resolution
+              projectRoot,
+              moduleSpecifierRoot
+            );
+
+          if (!options.workflowManifest) {
+            options.workflowManifest = {};
+          }
+
+          mergeWorkflowManifest(
+            options.workflowManifest,
+            workflowManifest,
+            stepIdsForCurrentBuild,
+            workflowIdsForCurrentBuild
+          );
+
+          return {
+            contents: transformedCode,
+            loader,
+          };
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          console.error(
+            `❌ SWC transform error in ${args.path}:`,
+            errorMessage
+          );
+          return {
+            errors: [
+              {
+                text: `SWC transform failed: ${errorMessage}`,
+                location: { file: args.path, line: 0, column: 0 },
+              },
+            ],
+          };
+        }
+      });
+    },
+  };
+}
+
+function isProjectLocalFile(filePath: string, projectRoot: string): boolean {
+  if (normalizePath(filePath).includes('/node_modules/')) {
+    return false;
+  }
+
+  return (
+    resolveModuleSpecifier(filePath, projectRoot).moduleSpecifier === undefined
+  );
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@workflow/example-nitro",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "scripts": {
+    "generate:workflows": "node ../scripts/generate-workflows-registry.js",
+    "predev": "pnpm generate:workflows",
+    "prebuild": "pnpm generate:workflows",
+    "dev": "nitro dev",
+    "build": "nitro build",
+    "start": "node .output/server/index.mjs"
+  },
+  "devDependencies": {
+    "@workflow/world-postgres": "workspace:*",
+    "ai": "catalog:",
+    "lodash.chunk": "^4.2.0",
+    "nitro": "catalog:",
+    "openai": "^6.1.0",
+    "rollup": "^4.53.2",
+    "workflow": "workspace:*",
+    "@workflow/ai": "workspace:*",
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@node-rs/xxhash": "1.7.6"
+  }
+}

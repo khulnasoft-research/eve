@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.org/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": ["WORKFLOW_WEB_VERCEL_BUILD"],
+      "outputs": ["build/**", ".vercel/react-router-build-result.json"]
+    }
+  }
+}
