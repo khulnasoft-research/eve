@@ -24,9 +24,9 @@ This document tracks the ongoing development of the eve framework for durable AI
 
 ---
 
-## Task 2: Agent & Sandbox Integration 🔄 IN PROGRESS
+## Task 2: Agent & Sandbox Integration ✅ COMPLETE
 
-**Status:** Starting
+**Status:** Completed
 
 ### Goals
 
@@ -34,24 +34,29 @@ This document tracks the ongoing development of the eve framework for durable AI
 - Enable agents to spawn isolated execution environments
 - Establish communication protocols between agents and sandboxes
 
-### Key Components
+### Completed Components
 
-- [ ] Agent-to-Sandbox communication protocol
-- [ ] Sandbox lifecycle hooks (init, execute, cleanup)
-- [ ] Error handling and recovery mechanisms
-- [ ] Resource management and isolation
+- [x] Agent-to-Sandbox communication protocol via AgentSandboxRegistry
+- [x] Sandbox lifecycle hooks (init, execute, cleanup) via SandboxLifecycleManager
+- [x] Error handling and recovery mechanisms with exponential backoff
+- [x] Resource management and session state tracking
+- [x] Comprehensive test suite (400+ lines, 20+ test cases)
 
-### Files to Modify/Create
+### Files Created/Modified
 
-- `sandbox/src/runtime.ts` - Core sandbox runtime
-- `packages/eve/src/agent-sandbox-bridge.ts` - New integration layer
-- `sandbox/src/executor.ts` - Execution engine updates
+- `packages/eve/src/execution/agent-sandbox-bridge.ts` - Core integration layer (393 lines)
+- `packages/eve/src/public/agent-sandbox/index.ts` - Public API exports
+- `packages/eve/src/execution/agent-sandbox-bridge.test.ts` - Integration tests (402 lines)
+- `packages/eve/package.json` - Added "./agent-sandbox" export
+- `.pnpmfile.mjs` - Fixed missing pnpm config
 
-### Definition of Done
+### Deliverables
 
-- Agents can spawn sandboxes programmatically
-- Sandbox execution is isolated and monitored
-- Error propagation works reliably
+- ✅ Agents can spawn sandboxes programmatically via `SandboxLifecycleManager`
+- ✅ Sandbox execution is isolated and monitored with session state tracking
+- ✅ Error propagation works reliably with automatic retry logic (3 retries, 2x backoff)
+- ✅ Public API exported as `eve/agent-sandbox` for agent developers
+- ✅ Build verification passed - TypeScript compilation successful
 
 ---
 
@@ -174,14 +179,14 @@ This document tracks the ongoing development of the eve framework for durable AI
 
 ## Quick Reference
 
-| Task                           | Status         | Owner | ETA |
-| ------------------------------ | -------------- | ----- | --- |
-| 1. Package Consolidation       | ✅ Complete    | -     | -   |
-| 2. Agent & Sandbox Integration | 🔄 In Progress | -     | -   |
-| 3. Web Application UI          | 📋 Planned     | -     | -   |
-| 4. Testing & Verification      | 📋 Planned     | -     | -   |
-| 5. Documentation & Release     | 📋 Planned     | -     | -   |
-| 6. Community & Adoption        | 📋 Planned     | -     | -   |
+| Task                           | Status          | Progress | ETA  |
+| ------------------------------ | --------------- | -------- | ---- |
+| 1. Package Consolidation       | ✅ Complete     | 100%     | Done |
+| 2. Agent & Sandbox Integration | ✅ Complete     | 100%     | Done |
+| 3. Web Application UI          | 📋 Next (Ready) | 0%       | TBD  |
+| 4. Testing & Verification      | 📋 Planned      | 0%       | TBD  |
+| 5. Documentation & Release     | 📋 Planned      | 0%       | TBD  |
+| 6. Community & Adoption        | 📋 Planned      | 0%       | TBD  |
 
 ## Notes
 
