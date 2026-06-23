@@ -131,6 +131,11 @@
       "import": "./dist/src/public/sandbox/index.js",
       "default": "./dist/src/public/sandbox/index.js"
     },
+    "./agent-sandbox": {
+      "types": "./dist/src/public/agent-sandbox/index.d.ts",
+      "import": "./dist/src/public/agent-sandbox/index.js",
+      "default": "./dist/src/public/agent-sandbox/index.js"
+    },
     "./sandbox/docker": {
       "types": "./dist/src/public/sandbox/docker.d.ts",
       "import": "./dist/src/public/sandbox/docker.js",
