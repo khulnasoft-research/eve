@@ -233,19 +233,24 @@ export async function executeWithRecovery(
   for (let attempt = 0; attempt <= strategy.maxRetries; attempt++) {
     try {
       const startTime = Date.now();
-      await sandboxSession.spawn({
+      const process = await sandboxSession.spawn({
         command: command,
       });
-      // The process output is available through reading from the session
-      // For now, we simulate a successful execution
-      const exitCode = 0;
+
+      if (!process) {
+        throw new Error("Spawn returned null process");
+      }
+
+      const result = await process.output();
+
+      const exitCode = result.exitCode ?? 0;
       const executionTimeMs = Date.now() - startTime;
 
       return {
         success: exitCode === 0,
         exitCode,
-        stdout: "",
-        stderr: "",
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
         executionTimeMs,
       };
     } catch (error) {
