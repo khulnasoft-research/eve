@@ -5,7 +5,7 @@ import {
   getGlobalSandboxRegistry,
   resetGlobalSandboxRegistry,
 } from "./agent-sandbox-bridge.js";
-import type { SandboxSession, SandboxProcess } from "#public/sandbox/index.js";
+import type { SandboxSession } from "#public/sandbox/index.js";
 
 describe("AgentSandboxRegistry - Load & Performance", () => {
   let registry: AgentSandboxRegistry;
@@ -134,7 +134,18 @@ describe("executeWithRecovery - Error Scenario Validation", () => {
   beforeEach(() => {
     mockSession = {
       spawn: (async () => ({
-        output: async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("ok"));
+            controller.close();
+          },
+        }),
+        stderr: new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        wait: async () => ({ exitCode: 0 }),
       })) as any,
     };
   });
@@ -163,7 +174,17 @@ describe("executeWithRecovery - Error Scenario Validation", () => {
 
   it("handles process output throwing", async () => {
     (mockSession.spawn as any) = async () => ({
-      output: async () => {
+      stdout: new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+      stderr: new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+      wait: async () => {
         throw new Error("output error");
       },
     });
@@ -181,7 +202,18 @@ describe("executeWithRecovery - Error Scenario Validation", () => {
       callCount++;
       if (callCount <= 2) throw new Error("transient");
       return {
-        output: async () => ({ exitCode: 0, stdout: "recovered", stderr: "" }),
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("recovered"));
+            controller.close();
+          },
+        }),
+        stderr: new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        wait: async () => ({ exitCode: 0 }),
       };
     };
 

@@ -1,17 +1,15 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import {
   AgentSandboxRegistry,
-  SandboxSessionState,
   SandboxOperationError,
-  AgentSandboxSpawnConfig,
-  SandboxExecutionResult,
   SandboxLifecycleManager,
   executeWithRecovery,
   defaultErrorRecoveryStrategy,
   getGlobalSandboxRegistry,
   resetGlobalSandboxRegistry,
 } from "./agent-sandbox-bridge.js";
-import type { SandboxSession, SandboxProcess } from "#public/sandbox/index.js";
+import type { SandboxSessionState, AgentSandboxSpawnConfig } from "./agent-sandbox-bridge.js";
+import type { SandboxSession } from "#public/sandbox/index.js";
 
 describe("AgentSandboxRegistry", () => {
   let registry: AgentSandboxRegistry;
@@ -151,7 +149,7 @@ describe("AgentSandboxRegistry", () => {
 
     const activeSessions = registry.getAllSessions();
     expect(activeSessions).toHaveLength(1);
-    expect(activeSessions[0].sessionId).toBe("session-1");
+    expect(activeSessions[0]!.sessionId).toBe("session-1");
   });
 });
 
@@ -174,15 +172,22 @@ describe("SandboxOperationError", () => {
 
 describe("executeWithRecovery", () => {
   let mockSession: Partial<SandboxSession>;
-  let mockProcess: Partial<SandboxProcess>;
+  let mockProcess: any;
 
   beforeEach(() => {
     mockProcess = {
-      output: vi.fn().mockResolvedValue({
-        exitCode: 0,
-        stdout: "success",
-        stderr: "",
+      stdout: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("success"));
+          controller.close();
+        },
       }),
+      stderr: new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+      wait: vi.fn().mockResolvedValue({ exitCode: 0 }),
     };
 
     mockSession = {
@@ -242,11 +247,7 @@ describe("executeWithRecovery", () => {
   });
 
   it("returns error result for non-zero exit code", async () => {
-    (mockProcess.output as any).mockResolvedValue({
-      exitCode: 1,
-      stdout: "",
-      stderr: "Error occurred",
-    });
+    mockProcess.wait = vi.fn().mockResolvedValue({ exitCode: 1 });
 
     const result = await executeWithRecovery(mockSession as SandboxSession, "false");
 
@@ -307,11 +308,18 @@ describe("SandboxLifecycleManager", () => {
   it("executes code with lifecycle hooks", async () => {
     const mockSession: Partial<SandboxSession> = {
       spawn: vi.fn().mockResolvedValue({
-        output: vi.fn().mockResolvedValue({
-          exitCode: 0,
-          stdout: "output",
-          stderr: "",
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("output"));
+            controller.close();
+          },
         }),
+        stderr: new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        wait: vi.fn().mockResolvedValue({ exitCode: 0 }),
       }),
     };
 

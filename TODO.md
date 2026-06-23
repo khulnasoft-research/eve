@@ -142,9 +142,9 @@ This document tracks the ongoing development of the eve framework for durable AI
 
 ---
 
-## Task 5: Documentation & Release
+## Task 5: Documentation & Release ✅ COMPLETE
 
-**Status:** Planned
+**Status:** Completed
 
 ### Goals
 
@@ -152,25 +152,36 @@ This document tracks the ongoing development of the eve framework for durable AI
 - Prepare release notes and migration guides
 - Set up CI/CD for automated releases
 
-### Scope
+### Completed Components
 
-- [ ] API documentation updates
-- [ ] Tutorial: "Building agents with sandboxes"
-- [ ] Migration guide for existing projects
-- [ ] Release notes for v1.0
-- [ ] CI/CD pipeline configuration
+- [x] CI/CD pipeline (GitHub Actions: CI + Release via Changesets)
+- [x] Migration guide (`docs/guides/migration.md`)
+- [x] Tutorial: "Building agents with sandboxes" (`docs/tutorial/building-agents-with-sandboxes.mdx`)
+- [x] Updated CHANGELOG.md with v1.0.0 release notes
+- [x] Navigation updates (meta.json files)
+- [x] Created TASK_5_COMPLETION.md
 
-### Files to Modify/Create
+### Files Created
 
-- `docs/` - Documentation site updates
-- `CHANGELOG.md` - Release notes
-- CI/CD configuration files
+- `.github/workflows/ci.yml` - 7-job CI pipeline (lint, typecheck, tests, deps, invariants, docs)
+- `.github/workflows/release.yml` - Changesets-based automated release workflow
+- `docs/guides/migration.md` - Migration guide covering sandbox bridge, stream API, testing infra, dashboard upgrades
+- `docs/tutorial/building-agents-with-sandboxes.mdx` - 7-step tutorial
+- `TASK_5_COMPLETION.md` - Completion summary
+
+### Files Modified
+
+- `packages/eve/CHANGELOG.md` - Added v1.0.0 release notes
+- `docs/meta.json` - Added migration to guides nav
+- `docs/guides/meta.json` - Added migration page
+- `docs/tutorial/meta.json` - Added sandbox tutorial page
+- `TODO.md` - Marked Task 5 complete
 
 ### Definition of Done
 
-- Docs reflect all new features
-- Release process is automated
-- Community has clear upgrade path
+- ✅ Docs reflect all new features (migration guide + tutorial)
+- ✅ Release process is automated (Changesets + GitHub Actions)
+- ✅ Community has clear upgrade path (migration guide)
 
 ---
 
@@ -207,7 +218,7 @@ This document tracks the ongoing development of the eve framework for durable AI
 | 2. Agent & Sandbox Integration | ✅ Complete | 100%     | Done |
 | 3. Web Application UI          | ✅ Complete | 100%     | Done |
 | 4. Testing & Verification      | ✅ Complete | 100%     | Done |
-| 5. Documentation & Release     | 📋 Planned  | 0%       | TBD  |
+| 5. Documentation & Release     | ✅ Complete | 100%     | Done |
 | 6. Community & Adoption        | 📋 Planned  | 0%       | TBD  |
 
 ## Notes
