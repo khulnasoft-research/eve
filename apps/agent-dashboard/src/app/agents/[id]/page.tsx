@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAgentStore, useSelectedAgent, useAgentSandboxes, useDashboardData } from "@/hooks";
 import { SandboxMonitor } from "@/components/SandboxMonitor";
@@ -9,11 +9,8 @@ interface AgentDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
-/**
- * Agent detail page showing full information and running sandboxes
- */
 export default function AgentDetailPage({ params }: AgentDetailPageProps) {
-  const resolvedParams = use(params);
+  const resolvedParams = useParams(params);
   const { selectAgent, error: storeError } = useAgentStore((state) => ({
     selectAgent: state.selectAgent,
     error: state.error,
@@ -119,12 +116,11 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
   );
 }
 
-// Helper to use params in client component
-function use<T>(promise: Promise<T>): T {
-  const [value, setValue] = React.useState<T | null>(null);
-  const [error, setError] = React.useState<Error | null>(null);
+function useParams<T>(promise: Promise<T>): T {
+  const [value, setValue] = useState<T | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     let isMounted = true;
 
     promise
@@ -147,5 +143,3 @@ function use<T>(promise: Promise<T>): T {
 
   return value;
 }
-
-import React from "react";

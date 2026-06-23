@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 /**
@@ -43,7 +44,6 @@ export async function GET(request: NextRequest) {
  * Generate WebSocket accept header value
  */
 function generateWebSocketAccept(key: string): string {
-  const crypto = require("crypto");
   const guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
   const sha1 = crypto
     .createHash("sha1")
