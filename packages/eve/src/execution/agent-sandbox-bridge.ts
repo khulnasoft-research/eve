@@ -6,6 +6,7 @@
  */
 
 import type { SandboxSession, SandboxProcess } from "#public/sandbox/index.js";
+import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 
 /**
  * Configuration for an agent's sandbox spawn request
@@ -241,16 +242,18 @@ export async function executeWithRecovery(
         throw new Error("Spawn returned null process");
       }
 
-      const result = await process.output();
-
-      const exitCode = result.exitCode ?? 0;
+      const [{ exitCode }, stdoutBuf, stderrBuf] = await Promise.all([
+        process.wait(),
+        streamToBuffer(process.stdout),
+        streamToBuffer(process.stderr),
+      ]);
       const executionTimeMs = Date.now() - startTime;
 
       return {
         success: exitCode === 0,
         exitCode,
-        stdout: result.stdout ?? "",
-        stderr: result.stderr ?? "",
+        stdout: stdoutBuf.toString(),
+        stderr: stderrBuf.toString(),
         executionTimeMs,
       };
     } catch (error) {

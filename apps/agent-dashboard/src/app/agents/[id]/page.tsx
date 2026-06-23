@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAgentStore, useSelectedAgent, useAgentSandboxes, useDashboardData } from "@/hooks";
 import { SandboxMonitor } from "@/components/SandboxMonitor";
