@@ -1,0 +1,193 @@
+---
+title: "Building Agents with Sandboxes"
+description: "Learn how to build agents that use sandboxed execution environments for safe, isolated code runs."
+---
+
+Sandboxes give your agent an isolated bash environment with a filesystem rooted at `/workspace`. Every eve agent has one by default — this tutorial shows you how to author it, seed files, manage sessions, and handle failures.
+
+## Prerequisites
+
+- Completed [Your First Agent](./first-agent) tutorial
+- eve 0.12+ installed
+- A model credential configured
+
+## Step 1: Inspect the default sandbox
+
+Every eve agent comes with a working sandbox out of the box. The built-in tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) already target it.
+
+Create a new agent and ask it to explore:
+
+```bash
+npx eve@latest init sandbox-demo
+cd sandbox-demo
+```
+
+```bash
+# Ask the agent: "What files are in /workspace?"
+```
+
+The agent uses `bash` to list files and `read_file` to inspect contents — all inside the sandbox.
+
+## Step 2: Seed files into the sandbox
+
+Place authored files under `agent/sandbox/workspace/` and they land in `/workspace` at session start:
+
+```text
+agent/sandbox/
+  sandbox.ts
+  workspace/
+    data/
+      sales.csv
+    scripts/
+      analyze.py
+```
+
+Create the sandbox override and seed data:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+export default defineSandbox({});
+```
+
+```csv title="agent/sandbox/workspace/data/sales.csv"
+month,revenue,units
+2026-01,12000,450
+2026-02,13500,480
+2026-03,14200,510
+2026-04,15800,535
+```
+
+Run the agent and ask: "Analyze the sales trend in /workspace/data/sales.csv". It reads the file and can write analysis scripts.
+
+## Step 3: Author a custom tool that uses the sandbox
+
+Tools can get a live sandbox handle via `ctx.getSandbox()`:
+
+```ts title="agent/tools/run_analysis.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Run a Python analysis script in the sandbox.",
+  inputSchema: z.object({ script: z.string() }),
+  async execute({ script }, ctx) {
+    const sandbox = await ctx.getSandbox();
+    await sandbox.writeTextFile({ path: "analysis/run.py", content: script });
+    const result = await sandbox.run({ command: "python analysis/run.py" });
+    return { stdout: result.stdout };
+  },
+});
+```
+
+## Step 4: Use spawn for long-running processes
+
+When a process should keep running (a dev server, a watcher), use `spawn` instead of `run`:
+
+```ts
+const sandbox = await ctx.getSandbox();
+const server = await sandbox.spawn({ command: "python -m http.server 8000" });
+
+// Do other work while the server runs
+await server.kill(); // Clean up when done
+```
+
+A `SandboxProcess` exposes `stdout`/`stderr` byte streams, `wait()` for the exit code, and `kill()`.
+
+## Step 5: Manage sessions with lifecycle hooks
+
+For production agents, use `SandboxLifecycleManager` to add setup, teardown, and recovery:
+
+```ts
+import { SandboxLifecycleManager } from "eve/agent-sandbox";
+
+const manager = new SandboxLifecycleManager({
+  onInit: async (state) => {
+    console.log(`Session ${state.sessionId} starting`);
+  },
+  beforeExecute: async (state, command) => {
+    if (command.includes("rm -rf /")) {
+      throw new Error("Dangerous command blocked");
+    }
+  },
+  afterExecute: async (state, result) => {
+    console.log(`Exit code: ${result.exitCode}`);
+  },
+  onCleanup: async (state) => {
+    console.log(`Session ${state.sessionId} cleaned up`);
+  },
+});
+```
+
+## Step 6: Recover from failures
+
+Use `executeWithRecovery` for automatic retry with exponential backoff:
+
+```ts
+import { executeWithRecovery } from "eve/agent-sandbox";
+
+const result = await executeWithRecovery(sandboxSession, "flaky-command.sh", {
+  strategy: {
+    maxRetries: 3,
+    initialDelayMs: 100,
+    backoffMultiplier: 2,
+  },
+  onRetry: (attempt, error) => {
+    console.warn(`Attempt ${attempt} failed: ${error.message}`);
+  },
+});
+
+if (result.success) {
+  console.log(result.stdout);
+} else {
+  console.error("Permanent failure:", result.error);
+}
+```
+
+## Step 7: Test your sandbox agent
+
+Unit-test your sandbox logic by mocking the process:
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { AgentSandboxRegistry } from "eve/agent-sandbox";
+
+describe("Sandbox agent", () => {
+  it("registers a session", () => {
+    const registry = new AgentSandboxRegistry();
+    registry.registerSession({
+      sessionId: "test-1",
+      agentId: "agent-1",
+      isActive: true,
+      createdAt: new Date(),
+    });
+    expect(registry.getSession("test-1")).toBeDefined();
+  });
+});
+```
+
+Mock `SandboxProcess` with streams:
+
+```ts
+const mockProcess = {
+  stdout: new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("hello"));
+      controller.close();
+    },
+  }),
+  stderr: new ReadableStream({
+    start(controller) {
+      controller.close();
+    },
+  }),
+  wait: vi.fn().mockResolvedValue({ exitCode: 0 }),
+};
+```
+
+## Next steps
+
+- Read the [Sandbox reference](../sandbox) for the full API
+- Learn about [backends](../sandbox#backends) (Vercel, Docker, microsandbox)
+- Configure [network policy](../sandbox#network-policy) for production
+- See the [migration guide](../guides/migration) for upgrading existing projects

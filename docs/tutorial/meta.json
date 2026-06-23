@@ -9,6 +9,7 @@
     "remember-definitions",
     "team-playbooks",
     "guard-the-spend",
-    "ship-it"
+    "ship-it",
+    "building-agents-with-sandboxes"
   ]
 }
