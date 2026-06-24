@@ -17,13 +17,7 @@
     "build": {
       "dependsOn": ["^typecheck"],
       "inputs": ["tsconfig.json", "node_modules/**", "src/**"],
-      "outputs": [
-        "dist/**",
-        "build/**",
-        ".next/**",
-        ".vercel/**",
-        "!.next/cache/**"
-      ],
+      "outputs": ["dist/**", "build/**", ".next/**", ".vercel/**", "!.next/cache/**"],
 
       "cache": false
     },
@@ -35,6 +29,12 @@
     "@vercel/sandbox#build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
+    },
+    "lint": {
+      "outputs": []
+    },
+    "fmt": {
+      "outputs": []
     },
     "dev": {
       "inputs": [

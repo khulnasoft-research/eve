@@ -25,6 +25,7 @@
     "dev": { "cache": false, "persistent": true },
     "typecheck": { "dependsOn": ["^typecheck"], "outputs": [] },
     "lint": { "dependsOn": ["^lint"], "outputs": [] },
-    "lint:fix": { "dependsOn": ["^lint:fix"], "outputs": [] }
+    "lint:fix": { "dependsOn": ["^lint:fix"], "outputs": [] },
+    "fmt": { "outputs": [] }
   }
 }

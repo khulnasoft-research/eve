@@ -1,228 +1,271 @@
-# Eve Framework Development Roadmap
+# Monorepo Migration — Task List
 
-## Overview
-
-This document tracks the ongoing development of the eve framework for durable AI agents. The work is organized into 6 major milestones, each representing a distinct system or integration phase.
+**Legend:** `[ ]` pending · `[~]` in progress · `[x]` completed · `[-]` blocked
 
 ---
 
-## Task 1: Package Consolidation & Migration ✅ COMPLETE
+## Phase 1 — Toolchain Unification
 
-**Status:** Completed
+### 1.1 Pin pnpm versions
 
-### Goals
+- [ ] Update `sandbox/package.json` → `"packageManager": "pnpm@11.7.0"`
+- [ ] Update `open-agents/package.json` → `"packageManager": "pnpm@11.7.0"`
+- [ ] Update `ai-elements/package.json` → `"packageManager": "pnpm@11.7.0"`
+- [ ] Update `workflow/package.json` → `"packageManager": "pnpm@11.7.0"`
 
-- Consolidate package structure across the monorepo
-- Migrate existing packages to aligned dependency versions
-- Ensure all packages follow consistent export patterns
+### 1.2 Convert sandbox/ Prettier → oxfmt + oxlint
 
-### Deliverables
+- [ ] Remove `npx husky` / `lint-staged` / Prettier config from `sandbox/`
+- [ ] Add `.oxfmtrc.json` to `sandbox/`
+- [ ] Add `.oxlintrc.json` to `sandbox/`
+- [ ] Add `lint` and `fmt` scripts to `sandbox/package.json`
+- [ ] Add `simple-git-hooks` config to `sandbox/` (match root)
 
-- [x] Unified package management strategy
-- [x] Dependency version alignment across `ai-elements`, `sandbox`, `workflow`, and `open-agents`
-- [x] Consistent build and export configuration
+### 1.3 Convert workflow/ Biome → oxfmt + oxlint
 
----
+- [ ] Remove `workflow/biome.json`
+- [ ] Remove `@biomejs/biome` from workflow catalog/deps
+- [ ] Add `.oxfmtrc.json` to `workflow/`
+- [ ] Add `.oxlintrc.json` to `workflow/`
+- [ ] Update `workflow/package.json` `lint`/`format`/`check` scripts
+- [ ] Update `workflow/` husky/lint-staged to use oxfmt
+- [ ] Update `.editorconfig` if needed to match root conventions
 
-## Task 2: Agent & Sandbox Integration ✅ COMPLETE
+### 1.4 Unify TypeScript configs
 
-**Status:** Completed
+- [ ] Audit all tsconfigs in `sandbox/` — update to ES2024/NodeNext
+- [ ] Audit all tsconfigs in `open-agents/` — update to ES2024/NodeNext
+- [ ] Audit all tsconfigs in `ai-elements/` — update to ES2024/NodeNext
+- [ ] Audit all tsconfigs in `workflow/` — update to ES2024/NodeNext
 
-### Goals
+### 1.5 Enable strict TS flags everywhere
 
-- Integrate agent lifecycle management with sandbox runtime
-- Enable agents to spawn isolated execution environments
-- Establish communication protocols between agents and sandboxes
+- [ ] Add `verbatimModuleSyntax: true` to all sub-workspace tsconfigs
+- [ ] Add `erasableSyntaxOnly: true` to all sub-workspace tsconfigs
+- [ ] Add `noUncheckedIndexedAccess: true` to all sub-workspace tsconfigs
+- [ ] Add `noUncheckedSideEffectImports: true` to all sub-workspace tsconfigs
 
-### Completed Components
+### 1.6 Add lint/fmt turbo tasks
 
-- [x] Agent-to-Sandbox communication protocol via AgentSandboxRegistry
-- [x] Sandbox lifecycle hooks (init, execute, cleanup) via SandboxLifecycleManager
-- [x] Error handling and recovery mechanisms with exponential backoff
-- [x] Resource management and session state tracking
-- [x] Comprehensive test suite (400+ lines, 20+ test cases)
-
-### Files Created/Modified
-
-- `packages/eve/src/execution/agent-sandbox-bridge.ts` - Core integration layer (393 lines)
-- `packages/eve/src/public/agent-sandbox/index.ts` - Public API exports
-- `packages/eve/src/execution/agent-sandbox-bridge.test.ts` - Integration tests (402 lines)
-- `packages/eve/package.json` - Added "./agent-sandbox" export
-- `.pnpmfile.mjs` - Fixed missing pnpm config
-
-### Deliverables
-
-- ✅ Agents can spawn sandboxes programmatically via `SandboxLifecycleManager`
-- ✅ Sandbox execution is isolated and monitored with session state tracking
-- ✅ Error propagation works reliably with automatic retry logic (3 retries, 2x backoff)
-- ✅ Public API exported as `eve/agent-sandbox` for agent developers
-- ✅ Build verification passed - TypeScript compilation successful
+- [ ] Add `lint` and `fmt` tasks to each sub-workspace `turbo.json`
+- [ ] Run `pnpm lint` repo-wide and fix violations
+- [ ] Run `pnpm fmt` repo-wide
+- [ ] Run `pnpm typecheck` repo-wide and fix errors
 
 ---
 
-## Task 3: Web Application UI Integration ✅ COMPLETE
+## Phase 2 — Catalog & Dependency Unification
 
-**Status:** Completed
+### 2.1 Merge sandbox catalog
 
-### Goals
+- [ ] Identify sandbox-only catalog entries (`tsdown`, `vitest@3.2.1`)
+- [ ] Merge into root `pnpm-workspace.yaml` catalog
+- [ ] Resolve `vitest@3.2.1` vs root `vitest@4.1.7`
 
-- Build interactive web UI for agent management and monitoring
-- Integrate with eve APIs for agent/sandbox data
-- Provide real-time agent state visibility
+### 2.2 Merge open-agents catalog
 
-### Completed Components
+- [ ] Identify open-agents-only catalog entries
+- [ ] Merge into root catalog
+- [ ] Resolve `ai@^6.0.165` vs `ai@7.0.0-beta.178`
+- [ ] Resolve `@ai-sdk/*` version differences
 
-- [x] Agent dashboard (list, status, metrics display)
-- [x] Real-time data fetching with polling and WebSocket
-- [x] Sandbox execution monitor with resource visualization
-- [x] Agent detail pages with sandbox session tracking
-- [x] Responsive UI built with React 19 and Tailwind CSS
-- [x] Zustand state management for efficient updates
+### 2.3 Merge ai-elements catalog
 
-### Files Created
+- [ ] Identify ai-elements-only catalog entries
+- [ ] Merge into root catalog
 
-- `apps/agent-dashboard/` - Full Next.js 16 application
-  - Dashboard UI components (7 components)
-  - REST API routes (5 endpoints)
-  - State management hooks (2 hooks)
-  - Type definitions and styling
-  - Production build verified
+### 2.4 Merge workflow catalog (largest)
 
-### Deliverables
+- [ ] Identify all 17 workflow catalog entries
+- [ ] Merge into root catalog
+- [ ] Resolve `typescript: ^5.9.3` vs `typescript: 7.0.1-rc`
+- [ ] Resolve `vitest: ^4.0.18` vs root `vitest: 4.1.7`
+- [ ] Handle `zod: 4.3.6` vs root `zod: 4.4.3`
+- [ ] Handle `@types/node: 22.19.0` vs root `@types/node: 25.9.1`
 
-- ✅ Web UI connects to agents via REST API with real-time updates
-- ✅ WebSocket and polling support for real-time agent/sandbox updates
-- ✅ Dashboard displays agent list, metrics, and sandbox sessions
-- ✅ Agent detail pages with sandbox resource monitoring
-- ✅ 2000+ lines of production code, fully typed
-- ✅ Next.js build completed successfully
+### 2.5 Resolve all version conflicts
 
----
+- [ ] Audit every package's actual dependency requirements
+- [ ] Pin compatible versions in root catalog
+- [ ] Use `overrides`/`pnpm.overrides` for blocking conflicts
+- [ ] Run `pnpm install` and verify no peer dep warnings
 
-## Task 4: Testing & Verification ✅ COMPLETE
+### 2.6 Remove duplicate catalog sections
 
-**Status:** Completed
+- [ ] Remove `catalog:` from `sandbox/pnpm-workspace.yaml`
+- [ ] Remove `catalog:` from `open-agents/pnpm-workspace.yaml`
+- [ ] Remove `catalog:` from `ai-elements/pnpm-workspace.yaml`
+- [ ] Remove `catalog:` from `workflow/pnpm-workspace.yaml`
 
-### Goals
+### 2.7 Update syncpack
 
-- Create comprehensive test coverage for all integrations
-- Establish E2E testing for agent-sandbox workflows
-- Performance and reliability benchmarks
-
-### Completed Components
-
-- [x] 68 unit/integration tests for agent-dashboard (store, components, API routes)
-- [x] 12 load/benchmark tests for AgentSandboxRegistry (concurrency, O(1) lookup, cleanup)
-- [x] 20 existing unit tests for agent-sandbox-bridge
-- [x] E2E fixture (agent-dashboard-workflow) with 7 eval tests
-- [x] Code coverage instrumentation (47% overall, >80% for testable modules)
-- [x] Fixed executeWithRecovery to properly handle process output
-- [x] Fixed code issues: `require("crypto")` → ESM import, `use` → `useParams`, `viewport` deprecation
-- [x] Performance baselines for AgentSandboxRegistry (1000 concurrent, O(1) lookup)
-
-### Files Created/Modified
-
-- `apps/agent-dashboard/package.json` - Added test deps (vitest, testing-library, jsdom, coverage)
-- `apps/agent-dashboard/vitest.config.ts` - Test configuration (jsdom, setup file, aliases)
-- `apps/agent-dashboard/src/internal/testing/setup.ts` - Test setup (jest-dom matchers)
-- `apps/agent-dashboard/src/hooks/useAgentStore.test.ts` - 23 store tests (100% coverage)
-- `apps/agent-dashboard/src/hooks/useDashboardData.test.ts` - Module export tests
-- `apps/agent-dashboard/src/components/AgentList.test.tsx` - 7 component tests
-- `apps/agent-dashboard/src/components/MetricsDisplay.test.tsx` - 9 component tests
-- `apps/agent-dashboard/src/components/SandboxMonitor.test.tsx` - 11 component tests
-- `apps/agent-dashboard/src/app/api/agents/route.test.ts` - 8 API route tests
-- `apps/agent-dashboard/src/app/api/agents/[id]/sandboxes/route.test.ts` - 5 API route tests
-- `apps/agent-dashboard/src/app/api/metrics/route.test.ts` - 3 API route tests
-- `apps/agent-dashboard/src/app/agents/[id]/page.tsx` - Fixed `use` → `useParams` rename
-- `apps/agent-dashboard/src/app/api/ws/route.ts` - Fixed `require("crypto")` → ESM import
-- `apps/agent-dashboard/src/app/layout.tsx` - Fixed `viewport` metadata deprecation
-- `packages/eve/src/execution/agent-sandbox-bridge.ts` - Fixed `executeWithRecovery` output handling
-- `packages/eve/src/execution/agent-sandbox-bridge.bench.test.ts` - 12 bench tests
-- `e2e/fixtures/agent-dashboard-workflow/` - Full E2E fixture with 7 eval tests
+- [ ] Audit `.syncpackrc.json` workspace pattern coverage
+- [ ] Add any missing sub-workspace patterns
+- [ ] Run `pnpm check:deps` and fix mismatches
+- [ ] Run `pnpm fix:deps`
 
 ---
 
-## Task 5: Documentation & Release ✅ COMPLETE
+## Phase 3 — Workspace Registration
 
-**Status:** Completed
+### 3.1 Add sub-workspace patterns to root pnpm-workspace.yaml
 
-### Goals
+- [ ] Add `sandbox/packages/*`
+- [ ] Add `sandbox/examples/*`
+- [ ] Add `open-agents/packages/*`
+- [ ] Add `open-agents/apps/*`
+- [ ] Add `ai-elements/packages/*`
+- [ ] Add `ai-elements/apps/*`
+- [ ] Add `workflow/packages/*`
+- [ ] Add `workflow/workbench/*`
+- [ ] Add `workflow/docs`
+- [ ] Add `workflow/tarballs`
 
-- Update public documentation with new features
-- Prepare release notes and migration guides
-- Set up CI/CD for automated releases
+### 3.2 Remove sub-workspace configs
 
-### Completed Components
+- [ ] Delete `sandbox/pnpm-workspace.yaml`
+- [ ] Delete `open-agents/pnpm-workspace.yaml`
+- [ ] Delete `ai-elements/pnpm-workspace.yaml`
+- [ ] Delete `workflow/pnpm-workspace.yaml`
+- [ ] Delete `sandbox/turbo.json`
+- [ ] Delete `open-agents/turbo.json`
+- [ ] Delete `ai-elements/turbo.json`
+- [ ] Delete `workflow/turbo.json`
 
-- [x] CI/CD pipeline (GitHub Actions: CI + Release via Changesets)
-- [x] Migration guide (`docs/guides/migration.md`)
-- [x] Tutorial: "Building agents with sandboxes" (`docs/tutorial/building-agents-with-sandboxes.mdx`)
-- [x] Updated CHANGELOG.md with v1.0.0 release notes
-- [x] Navigation updates (meta.json files)
-- [x] Created TASK_5_COMPLETION.md
+### 3.3 Verify single lockfile
 
-### Files Created
-
-- `.github/workflows/ci.yml` - 7-job CI pipeline (lint, typecheck, tests, deps, invariants, docs)
-- `.github/workflows/release.yml` - Changesets-based automated release workflow
-- `docs/guides/migration.md` - Migration guide covering sandbox bridge, stream API, testing infra, dashboard upgrades
-- `docs/tutorial/building-agents-with-sandboxes.mdx` - 7-step tutorial
-- `TASK_5_COMPLETION.md` - Completion summary
-
-### Files Modified
-
-- `packages/eve/CHANGELOG.md` - Added v1.0.0 release notes
-- `docs/meta.json` - Added migration to guides nav
-- `docs/guides/meta.json` - Added migration page
-- `docs/tutorial/meta.json` - Added sandbox tutorial page
-- `TODO.md` - Marked Task 5 complete
-
-### Definition of Done
-
-- ✅ Docs reflect all new features (migration guide + tutorial)
-- ✅ Release process is automated (Changesets + GitHub Actions)
-- ✅ Community has clear upgrade path (migration guide)
+- [ ] Run `pnpm install`
+- [ ] Verify all packages resolve correctly
+- [ ] Fix any package resolution errors
+- [ ] Verify `pnpm-lock.yaml` is at root only
 
 ---
 
-## Task 6: Community & Adoption
+## Phase 4 — Cross-Dependency Linking
 
-**Status:** Planned
+### 4.1 sandbox → workflow
 
-### Goals
+- [ ] Find all `sandbox/` packages referencing `workflow`
+- [ ] Change `"workflow": "4.2.0-beta.73"` → `"workflow": "workspace:*"`
+- [ ] Update import paths if needed
 
-- Support early adopters
-- Gather feedback for stabilization
-- Build example projects and case studies
+### 4.2 open-agents → @vercel/sandbox
 
-### Scope
+- [ ] Change `"@vercel/sandbox": "2.0.0-beta.11"` → `"@vercel/sandbox": "workspace:*"`
 
-- [ ] Community feedback collection
-- [ ] Example agent projects
-- [ ] Performance optimization based on feedback
-- [ ] Stability improvements
+### 4.3 open-agents → workflow
 
-### Definition of Done
+- [ ] Change `"workflow": "5.0.0-beta.5"` → `"workflow": "workspace:*"`
+- [ ] Change `"@workflow/ai": "5.0.0-beta.4"` → `"@workflow/ai": "workspace:*"`
 
-- Framework stabilized based on feedback
-- Example projects demonstrating key features
-- Ready for general availability
+### 4.4 sandbox internal deps
+
+- [ ] Verify `@vercel/sandbox` in sandbox uses `workspace:*`
+- [ ] Audit all other inter-sub-workspace deps
+
+### 4.5 workflow internal deps audit
+
+- [ ] Verify all `@workflow/*` packages reference each other via `workspace:*`
+- [ ] Check `workflow/` workbench apps reference published packages correctly
+- [ ] Run `pnpm install` and verify resolution
 
 ---
 
-## Quick Reference
+## Phase 5 — Root turbo.json Unification
 
-| Task                           | Status      | Progress | ETA  |
-| ------------------------------ | ----------- | -------- | ---- |
-| 1. Package Consolidation       | ✅ Complete | 100%     | Done |
-| 2. Agent & Sandbox Integration | ✅ Complete | 100%     | Done |
-| 3. Web Application UI          | ✅ Complete | 100%     | Done |
-| 4. Testing & Verification      | ✅ Complete | 100%     | Done |
-| 5. Documentation & Release     | ✅ Complete | 100%     | Done |
-| 6. Community & Adoption        | 📋 Planned  | 0%       | TBD  |
+### 5.1 Collect env vars
 
-## Notes
+- [ ] Gather all env vars from sub-workspace `turbo.json` `globalEnv` and task `env` arrays
+- [ ] Add them to root `turbo.json` `globalEnv` or task env vars
+- [ ] Ensure `envMode: "strict"` is satisfied
 
-- All tasks build incrementally; each depends on the previous milestone
-- Regular sync points are recommended between tasks
-- Community feedback should inform prioritization of remaining work
+### 5.2 Add build dependency chains
+
+- [ ] Map inter-package build order
+- [ ] Add `dependsOn` entries for cross-workspace builds
+- [ ] Test `pnpm build` repo-wide
+
+### 5.3 Add test tasks
+
+- [ ] Ensure `test`, `test:unit`, `test:integration` tasks cover all packages
+- [ ] Add any sub-workspace-specific test tasks
+
+### 5.4 Verify strict mode
+
+- [ ] Run full `pnpm build && pnpm test && pnpm typecheck`
+- [ ] Fix any turbo env var issues
+
+---
+
+## Phase 6 — Merge Changesets
+
+### 6.1 Merge changeset configs
+
+- [ ] Copy published package entries from `sandbox/.changeset/config.json`
+- [ ] Copy from `ai-elements/.changeset/config.json`
+- [ ] Copy from `workflow/.changeset/config.json`
+- [ ] Merge into root `.changeset/config.json`
+
+### 6.2 Remove duplicate configs
+
+- [ ] Delete `sandbox/.changeset/`
+- [ ] Delete `ai-elements/.changeset/`
+- [ ] Delete `workflow/.changeset/`
+
+### 6.3 Update scripts
+
+- [ ] Remove `changeset`/`version-packages`/`release` from sub-workspace `package.json`
+- [ ] Update root scripts to cover all published packages
+- [ ] Verify `pnpm changeset` works
+
+---
+
+## Phase 7 — CI Unification
+
+### 7.1 Update root test scripts
+
+- [ ] Ensure `pnpm test` runs all tiers
+- [ ] Update turbo test pipeline configs
+
+### 7.2 Update GitHub Actions
+
+- [ ] Review `.github/workflows/` for sub-workspace-specific jobs
+- [ ] Consolidate into unified workflows
+- [ ] Remove redundant CI steps
+
+### 7.3 Update invariants guard
+
+- [ ] Add any sub-workspace-specific invariants to `scripts/`
+- [ ] Run `pnpm guard:invariants`
+
+---
+
+## Phase 8 — Code Relocation (optional)
+
+- [ ] 8.1 Move `sandbox/packages/*` into `packages/`
+- [ ] 8.2 Move `workflow/packages/*` into `packages/`
+- [ ] 8.3 Move `ai-elements/packages/*` into `packages/`
+- [ ] 8.4 Move `open-agents/packages/*` into `packages/`
+- [ ] 8.5 Update all import paths and tsconfig references
+- [ ] 8.6 Clean up empty sub-workspace directories
+
+---
+
+## Verification Gates
+
+Each phase must pass before starting the next:
+
+| Gate             | Check                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| **Phase 1 done** | `pnpm lint`, `pnpm fmt`, `pnpm typecheck` all pass on entire repo                       |
+| **Phase 2 done** | `pnpm check:deps` passes; `pnpm install` clean                                          |
+| **Phase 3 done** | All packages visible via `pnpm ls --depth -1`; `pnpm install` single lockfile           |
+| **Phase 4 done** | `workspace:*` protocol used for all inter-package deps; `pnpm install` resolves cleanly |
+| **Phase 5 done** | `pnpm build` repo-wide succeeds                                                         |
+| **Phase 6 done** | `pnpm changeset status` shows all publishing packages                                   |
+| **Phase 7 done** | CI passes on a PR branch                                                                |
+| **Phase 8 done** | Directory tree is flat and consistent; all tests pass                                   |
+
+---
+
+**Total checklist items:** ~120 tasks across 8 phases.

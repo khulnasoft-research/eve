@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "**/tests/fixture/**",
+    "**/tests/errors/**",
+    "**/.well-known/workflow/**",
+    "**/.prebuilt/**",
+    "**/.workflow-data/**",
+    "**/routeTree.gen.ts"
+  ]
+}
