@@ -10,13 +10,17 @@
     "inlineSourceMap": true,
     "inlineSources": true,
     "isolatedModules": true,
-    "moduleResolution": "node16",
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noUncheckedIndexedAccess": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleResolution": "NodeNext",
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "preserveWatchOutput": true,
     "skipLibCheck": true,
-    "module": "node20",
-    "lib": ["es2022"],
+    "module": "NodeNext",
+    "lib": ["ES2024"],
     "strict": true
   }
 }

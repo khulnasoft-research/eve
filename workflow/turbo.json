@@ -11,13 +11,7 @@
         "$TURBO_ROOT$/pnpm-workspace.yaml",
         "$TURBO_ROOT$/.node-version"
       ],
-      "outputs": [
-        "dist/**",
-        "build",
-        ".svelte-kit",
-        ".vercel/output",
-        ".output/**"
-      ]
+      "outputs": ["dist/**", "build", ".svelte-kit", ".vercel/output", ".output/**"]
     },
     "dev": {
       "dependsOn": ["^build"],
@@ -30,6 +24,12 @@
     "test": {
       "dependsOn": ["^build"],
       "cache": false
+    },
+    "lint": {
+      "outputs": []
+    },
+    "fmt": {
+      "outputs": []
     },
     "clean": {
       "cache": false
